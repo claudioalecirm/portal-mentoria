@@ -120,16 +120,65 @@ export default async function handler(req, res) {
   }
 
   // ─── SALVAR MÓDULOS DA MENTORIA ───
+  // Regras: atualiza encontros pend e nxt dos alunos ativos
+  // Novos módulos → cria encontro para alunos ativos
+  // Módulos removidos → remove apenas os pend dos alunos ativos
+  // Módulos done (já realizados) → nunca mexe
   if (action === 'mentoria-modulos-salvar' && req.method === 'POST') {
     const { mentoria_id, modulos } = body
-    // Deleta todos os templates existentes
+    const novosModulos = modulos.map((m, i) => ({ ...m, numero: i + 1, nome: m.nome || `Módulo ${i + 1}` }))
+
+    // 1. Atualiza os templates da mentoria
     await supabase.from('encontros_template').delete().eq('mentoria_id', mentoria_id)
-    // Recria com a nova lista
-    if (modulos?.length) {
+    if (novosModulos.length) {
       await supabase.from('encontros_template').insert(
-        modulos.map((m, i) => ({ mentoria_id, numero: i + 1, nome: m.nome || `Módulo ${i + 1}` }))
+        novosModulos.map(m => ({ mentoria_id, numero: m.numero, nome: m.nome }))
       )
     }
+
+    // 2. Busca todos os alunos ativos desta mentoria
+    const { data: alunos } = await supabase
+      .from('alunos').select('id').eq('mentoria_id', mentoria_id).eq('acesso_ativo', true)
+
+    if (!alunos?.length) return res.status(200).json({ ok: true })
+
+    for (const aluno of alunos) {
+      // Busca encontros atuais do aluno
+      const { data: encAtual } = await supabase
+        .from('encontros').select('id, numero, status').eq('aluno_id', aluno.id)
+
+      const encMap = {}
+      for (const e of (encAtual || [])) encMap[e.numero] = e
+
+      for (const mod of novosModulos) {
+        const encExistente = encMap[mod.numero]
+        if (encExistente) {
+          // Atualiza nome se ainda não foi concluído (pend ou nxt)
+          if (encExistente.status !== 'done') {
+            await supabase.from('encontros')
+              .update({ nome: mod.nome })
+              .eq('id', encExistente.id)
+          }
+        } else {
+          // Módulo novo — cria encontro para este aluno
+          await supabase.from('encontros').insert({
+            aluno_id: aluno.id,
+            numero: mod.numero,
+            nome: mod.nome,
+            status: 'pend'
+          })
+        }
+      }
+
+      // Remove encontros pend que foram excluídos dos módulos
+      const numerosNovos = new Set(novosModulos.map(m => m.numero))
+      for (const e of (encAtual || [])) {
+        if (!numerosNovos.has(e.numero) && e.status === 'pend') {
+          await supabase.from('encontros').delete().eq('id', e.id)
+        }
+      }
+    }
+
     return res.status(200).json({ ok: true })
   }
 
