@@ -1,401 +1,642 @@
-// src/pages/DashMentor.jsx
 import { useState, useEffect } from 'react'
+import Mensagens from '../components/Mensagens.jsx'
 
-export default function DashMentor({ user, onLogout }) {
-  const [alunos, setAlunos] = useState([])
-  const [alunoSel, setAlunoSel] = useState(null)
-  const [dadosAluno, setDadosAluno] = useState(null)
-  const [tabAluno, setTabAluno] = useState(0)
-  const [tabMenu, setTabMenu] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [loadingAluno, setLoadingAluno] = useState(false)
-  const [msgTexto, setMsgTexto] = useState('')
-  const [novaTarefa, setNovaTarefa] = useState('')
+const TABS_MENTOR = ['Visão Geral', 'Mentorias', 'Ferramentas', 'Alunos']
+const TABS_ALUNO = ['Controle', 'Ficha', 'Encontros', 'Tarefas', 'Mensagens', 'Financeiro']
 
-  useEffect(() => { carregarAlunos() }, [])
+export default function DashMentor({ user, onLogout, showPush }) {
+  const [tab, setTab] = useState(0)
+  const [overview, setOverview] = useState(null)
+  const [mentorias, setMentorias] = useState([])
+  const [ferramentasGlobal, setFerramentasGlobal] = useState([])
+  const [alunoAtivo, setAlunoAtivo] = useState(null)
+  const [alunoTab, setAlunoTab] = useState(0)
+  const [alunoData, setAlunoData] = useState(null)
+  const [editEnc, setEditEnc] = useState(null)
+  const [modSel, setModSel] = useState('online')
+  const [mentoriaDetalhe, setMentoriaDetalhe] = useState(null)
+  const [msgDot, setMsgDot] = useState(false)
+  const [novaMentoriaNome, setNovaMentoriaNome] = useState('')
+  const [novaMentoriaQtd, setNovaMentoriaQtd] = useState('')
+  const [novaMentoriaEncs, setNovaMentoriaEncs] = useState([])
+  const [taskNome, setTaskNome] = useState('')
+  const [taskTipo, setTaskTipo] = useState('texto')
+  const [busca, setBusca] = useState('')
+  const [pctLocal, setPctLocal] = useState(0)
+  const [savingEnc, setSavingEnc] = useState(false)
 
-  const carregarAlunos = async () => {
-    setLoading(true)
-    const r = await fetch('/api/mentor?action=overview')
-    const d = await r.json()
-    setAlunos(d.alunos || [])
-    setLoading(false)
+  const carregarOverview = async () => {
+    try {
+      const [ovRes, mRes, fRes] = await Promise.all([
+        fetch('/api/mentor?action=overview'),
+        fetch('/api/mentor?action=mentorias'),
+        fetch('/api/mentor?action=ferramentas')
+      ])
+      const [ov, m, f] = await Promise.all([ovRes.json(), mRes.json(), fRes.json()])
+      setOverview(ov)
+      setMentorias(m.mentorias || [])
+      setFerramentasGlobal(f.ferramentas || [])
+      setMsgDot((ov.mensagensNaoLidas || []).length > 0)
+    } catch {}
   }
 
+  const carregarAluno = async (aluno_id) => {
+    try {
+      const res = await fetch(`/api/mentor?action=aluno-dados&aluno_id=${aluno_id}`)
+      const data = await res.json()
+      setAlunoData(data)
+      setPctLocal(data.aluno?.progresso || 0)
+    } catch {}
+  }
+
+  useEffect(() => { carregarOverview() }, [])
+
   const abrirAluno = async (aluno) => {
-    setAlunoSel(aluno)
-    setTabAluno(0)
-    setLoadingAluno(true)
-    const r = await fetch(`/api/mentor?action=aluno&aluno_id=${aluno.id}`)
-    const d = await r.json()
-    setDadosAluno(d)
-    setLoadingAluno(false)
+    setAlunoAtivo(aluno)
+    setAlunoTab(0)
+    setEditEnc(null)
+    await carregarAluno(aluno.id)
+  }
+
+  const salvarProgresso = async (novoVal) => {
+    await fetch('/api/mentor?action=progresso', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aluno_id: alunoAtivo.id, progresso: novoVal })
+    })
   }
 
   const toggleAcesso = async () => {
-    const novoAcesso = !dadosAluno.aluno.acesso_ativo
+    const novoAtivo = !alunoData?.aluno?.acesso_ativo
     await fetch('/api/mentor?action=acesso', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoSel.id, acesso_ativo: novoAcesso })
+      body: JSON.stringify({ aluno_id: alunoAtivo.id, ativo: novoAtivo })
     })
-    await abrirAluno(alunoSel)
+    carregarAluno(alunoAtivo.id)
   }
 
-  const enviarMensagem = async () => {
-    if (!msgTexto.trim()) return
-    await fetch('/api/mentor?action=mensagem', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoSel.id, texto: msgTexto })
+  const salvarEncontro = async () => {
+    if (!editEnc) return
+    setSavingEnc(true)
+    const payload = {
+      encontro_id: editEnc.id, aluno_id: alunoAtivo.id,
+      resumo: editEnc.resumo, ferramentas_aplicadas: editEnc.ferramentas,
+      tarefas_texto: editEnc.tarefas_texto,
+      proximo_nome: editEnc.proximo_nome, proximo_data: editEnc.proximo_data,
+      proximo_hora: editEnc.proximo_hora, proximo_modalidade: modSel,
+      proximo_link: editEnc.proximo_link, proximo_endereco: editEnc.proximo_endereco
+    }
+    await fetch('/api/mentor?action=encontro-salvar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     })
-    setMsgTexto('')
-    await abrirAluno(alunoSel)
+    setSavingEnc(false)
+    setEditEnc(null)
+    carregarAluno(alunoAtivo.id)
+    if (editEnc.proximo_data) {
+      const dtFmt = new Date(editEnc.proximo_data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+      showPush('Encontro salvo', `Aluno notificado: ${editEnc.proximo_nome} · ${dtFmt}`)
+    }
   }
 
   const adicionarTarefa = async () => {
-    if (!novaTarefa.trim()) return
-    await fetch('/api/mentor?action=tarefa', {
+    if (!taskNome.trim()) return
+    await fetch('/api/mentor?action=tarefa-adicionar', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoSel.id, nome: novaTarefa, tipo: 'texto' })
+      body: JSON.stringify({ aluno_id: alunoAtivo.id, nome: taskNome, tipo: taskTipo })
     })
-    setNovaTarefa('')
-    await abrirAluno(alunoSel)
+    setTaskNome('')
+    carregarAluno(alunoAtivo.id)
   }
 
-  const atualizarEncontro = async (encontro_id, campos) => {
-    await fetch('/api/mentor?action=encontro', {
+  const toggleFerramenta = async (fa) => {
+    await fetch('/api/mentor?action=ferramenta-toggle', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ encontro_id, ...campos })
+      body: JSON.stringify({ aluno_id: alunoAtivo.id, ferramenta_id: fa.ferramenta_id || fa.ferramentas?.id, habilitada: !fa.habilitada })
     })
-    await abrirAluno(alunoSel)
+    carregarAluno(alunoAtivo.id)
   }
 
-  const toggleFerramenta = async (ferramenta_id, habilitada) => {
-    await fetch('/api/mentor?action=ferramenta', {
+  const toggleFerramentaGlobal = async (f) => {
+    await fetch('/api/mentor?action=ferramenta-global', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoSel.id, ferramenta_id, habilitada })
+      body: JSON.stringify({ ferramenta_id: f.id, ativo: !f.ativo_global })
     })
-    await abrirAluno(alunoSel)
+    carregarOverview()
   }
 
-  const s = {
-    card: { background: '#111', border: '.5px solid rgba(255,255,255,.07)', borderRadius: 12, padding: '16px', marginBottom: 10 },
-    label: { fontSize: 10, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 },
-    inp: { width: '100%', background: '#171717', border: '.5px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#f0ece4', fontFamily: "'DM Sans',sans-serif", outline: 'none', boxSizing: 'border-box' },
+  const criarMentoria = async () => {
+    if (!novaMentoriaNome.trim() || novaMentoriaEncs.length === 0) return
+    await fetch('/api/mentor?action=mentoria-criar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: novaMentoriaNome, encontros: novaMentoriaEncs.map(e => e.nome) })
+    })
+    setNovaMentoriaNome(''); setNovaMentoriaQtd(''); setNovaMentoriaEncs([])
+    carregarOverview()
   }
 
-  // VISÃO OVERVIEW
-  if (!alunoSel) {
-    const MENU = ['Alunos', 'Mentorias']
+  const excluirMentoria = async (id) => {
+    if (!confirm('Excluir esta mentoria?')) return
+    await fetch('/api/mentor?action=mentoria-excluir', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mentoria_id: id })
+    })
+    setMentoriaDetalhe(null)
+    carregarOverview()
+  }
+
+  const alunos = overview?.alunos || []
+  const inadimp = alunos.filter(a => a.pagamento_status === 'negado' || a.pagamento_status === 'inadimplente')
+  const alunosFiltrados = alunos.filter(a => a.usuarios?.nome?.toLowerCase().includes(busca.toLowerCase()))
+  const initials = (nome) => nome?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+
+  // VISÃO DO ALUNO ABERTO
+  if (alunoAtivo && alunoData) {
+    const a = alunoData.aluno
+    const encontros = alunoData.encontros || []
+    const tarefas = alunoData.tarefas || []
+    const mensagens = alunoData.mensagens || []
+    const ferramentas = alunoData.ferramentas || []
+    const parcelas = alunoData.parcelas || []
+    const alinhamento = alunoData.alinhamento || null
+    const temMsgAluno = mensagens.some(m => m.de === 'aluno' && !m.lida)
+
     return (
-      <div style={{ minHeight: '100vh', background: '#0a0a0a', paddingBottom: 40 }}>
-        {/* Header */}
-        <div style={{ background: '#0a0a0a', borderBottom: '.5px solid rgba(255,255,255,.07)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 20, color: '#c8a97a' }}>Portal Mentor</div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <div style={{ fontSize: 12, color: '#9a9590' }}>{user.nome}</div>
-            <button onClick={onLogout} style={{ fontSize: 11, color: '#5a5550', background: 'none', border: 'none', cursor: 'pointer' }}>Sair</button>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <div className="topbar">
+          <div className="tlogo">CA</div>
+          <div className="tright">
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>{a?.usuarios?.nome}</div>
+            <div className="avatar">{initials(a?.usuarios?.nome)}</div>
+            <button className="exit-btn" onClick={() => { setAlunoAtivo(null); setAlunoData(null) }}>← Mentor</button>
           </div>
         </div>
+        <div className="tabs">
+          {TABS_ALUNO.map((t, i) => (
+            <div key={i} className={`tab${alunoTab === i ? ' active' : ''}`} onClick={() => setAlunoTab(i)}>
+              {t}{i === 4 && <div className={`tab-dot${temMsgAluno ? ' show' : ''}`} />}
+            </div>
+          ))}
+        </div>
+        <div className="content">
 
-        {/* Stats */}
-        <div style={{ padding: '20px 16px 0' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-            {[
-              { label: 'Alunos ativos', value: alunos.filter(a => a.acesso_ativo).length },
-              { label: 'Total de alunos', value: alunos.length },
-            ].map((item, i) => (
-              <div key={i} style={s.card}>
-                <div style={s.label}>{item.label}</div>
-                <div style={{ fontSize: 28, color: '#c8a97a', fontFamily: "'Cormorant Garamond',serif" }}>{item.value}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Lista de alunos */}
-          <div style={{ fontSize: 11, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 12 }}>Alunos</div>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" /></div>
-          ) : alunos.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 40 }}>Nenhum aluno ainda.</div>
-          ) : (
-            alunos.map(a => (
-              <div key={a.id} onClick={() => abrirAluno(a)}
-                style={{ ...s.card, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: 14, color: '#f0ece4', marginBottom: 4 }}>{a.usuarios?.nome}</div>
-                  <div style={{ fontSize: 11, color: '#9a9590' }}>{a.mentorias?.nome}</div>
-                  <div style={{ fontSize: 11, color: '#5a5550', marginTop: 2 }}>{a.usuarios?.email}</div>
+          {/* CONTROLE */}
+          {alunoTab === 0 && (
+            <>
+              <div className="card">
+                <div className="card-title">{a?.mentorias?.nome}</div>
+                <div className="card-sub">Controle individual</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text2)' }}>Evolução</span>
+                  <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 24, color: 'var(--amber)' }}>{pctLocal}%</span>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: a.acesso_ativo ? 'rgba(100,200,100,.1)' : 'rgba(196,90,90,.1)', color: a.acesso_ativo ? '#64c864' : '#c45a5a', marginBottom: 6 }}>
-                    {a.acesso_ativo ? 'Ativo' : 'Suspenso'}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#5a5550' }}>{a.progresso || 0}%</div>
+                <div className="pbar"><div className="pfill" style={{ width: pctLocal + '%' }} /></div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  {[-5, -1].map(d => (
+                    <button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => {
+                      const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v)
+                    }}>{d}%</button>
+                  ))}
+                  <span style={{ flex: 1 }} />
+                  {[1, 5].map(d => (
+                    <button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => {
+                      const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v)
+                    }}>+{d}%</button>
+                  ))}
                 </div>
               </div>
-            ))
+              <div className="card">
+                <div className="card-title">Acesso ao Portal</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                  <div className={`toggle${a?.acesso_ativo ? ' on' : ''}`} onClick={toggleAcesso} />
+                  <span style={{ fontSize: 13, color: 'var(--text2)' }}>{a?.acesso_ativo ? 'Acesso habilitado' : 'Acesso desabilitado'}</span>
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-title">Ferramentas Individuais</div>
+                <div style={{ marginTop: 10 }}>
+                  {ferramentas.map(fa => (
+                    <div key={fa.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderBottom: '.5px solid var(--border)' }}>
+                      <span style={{ flex: 1, fontSize: 13 }}>{fa.ferramentas?.nome}</span>
+                      <div className={`toggle${fa.habilitada ? ' on' : ''}`} onClick={() => toggleFerramenta(fa)} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
+
+          {/* FICHA — usa dados do alinhamento se disponível, senão dados diretos do aluno */}
+          {alunoTab === 1 && (
+            <div className="card">
+              <div className="card-title">Diagnóstico Inicial</div>
+              <div className="card-sub">Alinhamento de Expectativas</div>
+              <div style={{ marginTop: 10 }}>
+                {[
+                  ['Nome', a?.usuarios?.nome],
+                  ['E-mail', a?.usuarios?.email],
+                  ['Telefone', alinhamento?.telefone || a?.telefone],
+                  ['Mentoria', a?.mentorias?.nome],
+                  ['Motivação', alinhamento?.motivacao || a?.motivacao],
+                  ['Resultado esperado', alinhamento?.resultado_esperado || a?.resultado_esperado],
+                  ['Área de foco', alinhamento?.area_foco || a?.area_foco],
+                  ['Grande desafio', alinhamento?.grande_desafio || a?.grande_desafio],
+                  ['Obstáculo', alinhamento?.obstaculo || a?.obstaculo],
+                  ['Satisfação atual', (alinhamento?.satisfacao_atual || a?.satisfacao_atual) != null
+                    ? (alinhamento?.satisfacao_atual || a?.satisfacao_atual) + '/10' : '—'],
+                  ['Tentativas anteriores', alinhamento?.tentativas_anteriores || a?.tentativas_anteriores],
+                  ['Comprometimento', alinhamento?.comprometimento || a?.comprometimento],
+                  ['Visão ideal', alinhamento?.visao_ideal || a?.visao_ideal],
+                  ['Informações adicionais', alinhamento?.info_adicional || a?.info_adicional]
+                ].map(([label, val]) => (
+                  <div key={label} className="frow">
+                    <div className="flabel">{label}</div>
+                    <div className="fval">{val || '—'}</div>
+                  </div>
+                ))}
+                {alinhamento?.preenchido_em && (
+                  <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 12, textAlign: 'right' }}>
+                    Preenchido em {new Date(alinhamento.preenchido_em).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ENCONTROS */}
+          {alunoTab === 2 && (
+            <>
+              {!editEnc ? (
+                <div className="card">
+                  <div className="card-title">Encontros</div>
+                  <div className="card-sub">Clique para editar resumo e agendar próximo</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
+                    {encontros.map(e => (
+                      <div key={e.id} className="enc-item" onClick={() => { setEditEnc({ ...e }); setModSel(e.proximo_modalidade || 'online') }}>
+                        <div className={`enc-num ${e.status}`}>{e.numero}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{e.nome}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text3)' }}>{e.data_realizada ? new Date(e.data_realizada + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</div>
+                        </div>
+                        {e.status === 'done' && <span className="badge badge-green">Feito</span>}
+                        {e.status === 'nxt' && <span className="badge badge-amber">Editar</span>}
+                        {e.status === 'pend' && <span className="badge badge-gray">Futuro</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="card">
+                  <button className="back-btn" onClick={() => setEditEnc(null)}>← Encontros</button>
+                  <div className="card-title">Encontro {editEnc.numero} — {editEnc.nome}</div>
+                  <div className="card-sub" style={{ marginBottom: 16 }}>{editEnc.data_realizada || '—'}</div>
+                  <div className="fg">
+                    <div className="fl">Resumo <span style={{ color: 'var(--ok)', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>(visível ao aluno)</span></div>
+                    <textarea className="inp" value={editEnc.resumo || ''} onChange={e => setEditEnc(p => ({ ...p, resumo: e.target.value }))} placeholder="Resumo deste encontro..." />
+                  </div>
+                  <div className="fg">
+                    <div className="fl">Ferramentas Aplicadas</div>
+                    <input className="inp" value={editEnc.ferramentas || ''} onChange={e => setEditEnc(p => ({ ...p, ferramentas: e.target.value }))} placeholder="Ex: ATE, Código DNA" />
+                  </div>
+                  <div className="fg">
+                    <div className="fl">Tarefas</div>
+                    <textarea className="inp" style={{ minHeight: 60 }} value={editEnc.tarefas_texto || ''} onChange={e => setEditEnc(p => ({ ...p, tarefas_texto: e.target.value }))} placeholder="Tarefas atribuídas..." />
+                  </div>
+                  <div className="divider" />
+                  <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 15, color: 'var(--amber)', marginBottom: 12 }}>Próximo Encontro</div>
+                  <div className="fg">
+                    <div className="fl">Nome</div>
+                    <input className="inp" value={editEnc.proximo_nome || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_nome: e.target.value }))} placeholder="Ex: Governo da Vontade" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div className="fg"><div className="fl">Data</div><input className="inp" type="date" value={editEnc.proximo_data || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_data: e.target.value }))} /></div>
+                    <div className="fg"><div className="fl">Horário</div><input className="inp" type="time" value={editEnc.proximo_hora || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_hora: e.target.value }))} /></div>
+                  </div>
+                  <div className="fg">
+                    <div className="fl">Modalidade</div>
+                    <div className="mod-pills">
+                      <div className={`mod-pill${modSel === 'online' ? ' sel' : ''}`} onClick={() => setModSel('online')}>🔗 Online</div>
+                      <div className={`mod-pill${modSel === 'presencial' ? ' sel' : ''}`} onClick={() => setModSel('presencial')}>📍 Presencial</div>
+                    </div>
+                  </div>
+                  {modSel === 'online' && <div className="fg"><div className="fl">Link</div><input className="inp" value={editEnc.proximo_link || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_link: e.target.value }))} placeholder="https://meet.google.com/..." /></div>}
+                  {modSel === 'presencial' && <div className="fg"><div className="fl">Endereço</div><input className="inp" value={editEnc.proximo_endereco || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_endereco: e.target.value }))} placeholder="Rua, nº — bairro" /></div>}
+                  <button className="btn btn-amber btn-full" onClick={salvarEncontro} disabled={savingEnc}>
+                    {savingEnc ? 'Salvando...' : 'Salvar e Notificar Aluno'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* TAREFAS */}
+          {alunoTab === 3 && (
+            <>
+              <div className="card">
+                <div className="card-title">Nova Tarefa</div>
+                <div className="fg" style={{ marginTop: 10 }}><div className="fl">Nome</div><input className="inp" placeholder="Ex: Reflexão sobre liderança" value={taskNome} onChange={e => setTaskNome(e.target.value)} /></div>
+                <div className="fg">
+                  <div className="fl">Tipo</div>
+                  <select className="inp" value={taskTipo} onChange={e => setTaskTipo(e.target.value)}>
+                    <option value="texto">Texto livre (aluno preenche)</option>
+                    <option value="pdf">PDF (aluno baixa)</option>
+                  </select>
+                </div>
+                <button className="btn btn-amber btn-full" onClick={adicionarTarefa}>Atribuir Tarefa</button>
+              </div>
+              <div className="card">
+                <div className="card-title">Relatório de Tarefas</div>
+                <div className="card-sub">Status em tempo real</div>
+                {tarefas.map(t => (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '.5px solid var(--border)' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13 }}>{t.nome}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{t.tipo === 'pdf' ? 'PDF' : 'Texto'}</div>
+                      {t.concluida && t.resposta && (
+                        <div style={{ fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', borderRadius: 5, padding: 6, marginTop: 6, lineHeight: 1.4 }}>"{t.resposta}"</div>
+                      )}
+                      {t.concluida && t.concluida_em && (
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3 }}>
+                          {new Date(t.concluida_em).toLocaleDateString('pt-BR')} · {new Date(t.concluida_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      )}
+                    </div>
+                    <span className={t.concluida ? 'badge badge-green' : 'badge badge-gray'}>{t.concluida ? 'Feita' : 'Pendente'}</span>
+                  </div>
+                ))}
+                {tarefas.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 20 }}>Nenhuma tarefa atribuída.</div>}
+              </div>
+            </>
+          )}
+
+          {/* MENSAGENS */}
+          {alunoTab === 4 && (
+            <Mensagens alunoId={alunoAtivo.id} perspectiva="mentor"
+              onNovaMensagem={() => showPush('Mensagem enviada', `Para: ${a?.usuarios?.nome}`)} />
+          )}
+
+          {/* FINANCEIRO */}
+          {alunoTab === 5 && (
+            <div className="card">
+              <div className="card-title">Financeiro</div>
+              <div className="card-sub">Status de pagamento</div>
+
+              {/* Aviso de inadimplência */}
+              {(a?.pagamento_status === 'negado' || a?.pagamento_status === 'inadimplente') && (
+                <div style={{ background: 'rgba(196,90,90,.1)', border: '.5px solid rgba(196,90,90,.3)', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 13, color: 'var(--err)' }}>
+                  ⚠️ {a?.pagamento_aviso || 'Pagamento em atraso.'}
+                </div>
+              )}
+
+              <div style={{ marginTop: 12 }}>
+                <div className="frow">
+                  <div className="flabel">Forma de pagamento</div>
+                  <div className="fval" style={{ textTransform: 'capitalize' }}>{a?.forma_pagamento || '—'}</div>
+                </div>
+                <div className="frow">
+                  <div className="flabel">Status</div>
+                  <div className="fval">
+                    {a?.pagamento_status === 'ok' || !a?.pagamento_status
+                      ? <span style={{ color: 'var(--ok)' }}>✓ Em dia</span>
+                      : <span style={{ color: 'var(--err)' }}>⚠ {a?.pagamento_status}</span>
+                    }
+                  </div>
+                </div>
+              </div>
+
+              {/* Cartão/Pix — mensagem pago */}
+              {(a?.forma_pagamento === 'cartao' || a?.forma_pagamento === 'pix') && (
+                <div style={{ background: 'rgba(100,200,100,.08)', border: '.5px solid rgba(100,200,100,.2)', borderRadius: 8, padding: '12px 14px', marginTop: 12, fontSize: 13, color: 'var(--ok)' }}>
+                  ✓ Mentoria paga via {a?.forma_pagamento === 'cartao' ? 'cartão de crédito' : 'Pix'}
+                </div>
+              )}
+
+              {/* Boleto — lista parcelas */}
+              {a?.forma_pagamento === 'boleto' && (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '14px 0 8px' }}>Parcelas</div>
+                  {parcelas.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Sem parcelas registradas.</div>}
+                  {parcelas.sort((a, b) => a.numero - b.numero).map(p => (
+                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '.5px solid var(--border)' }}>
+                      <div>
+                        <div style={{ fontSize: 13 }}>Parcela {p.numero}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                          R$ {Number(p.valor).toFixed(2).replace('.', ',')}
+                          {p.vencimento ? ` · vence ${new Date(p.vencimento).toLocaleDateString('pt-BR')}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className={p.paga ? 'badge badge-green' : 'badge badge-red'}>{p.paga ? 'Paga' : 'Em aberto'}</span>
+                        {p.boleto_url && !p.paga && (
+                          <a href={p.boleto_url} target="_blank" rel="noreferrer"
+                            style={{ fontSize: 11, color: 'var(--amber)', textDecoration: 'none', border: '.5px solid var(--amber)', borderRadius: 4, padding: '3px 8px' }}>
+                            Boleto
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
     )
   }
 
-  // VISÃO ALUNO
-  const TABS_ALUNO = ['Controle', 'Ficha', 'Encontros', 'Tarefas', 'Mensagens', 'Financeiro']
-  const { aluno, encontros, tarefas, mensagens, ferramentas, parcelas, alinhamento } = dadosAluno || {}
-
+  // DASH MENTOR PRINCIPAL
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', paddingBottom: 40 }}>
-      {/* Header aluno */}
-      <div style={{ background: '#0a0a0a', borderBottom: '.5px solid rgba(255,255,255,.07)', padding: '12px 16px', position: 'sticky', top: 0, zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <button onClick={() => { setAlunoSel(null); setDadosAluno(null) }}
-            style={{ fontSize: 18, color: '#c8a97a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }}>←</button>
-          <div>
-            <div style={{ fontSize: 14, color: '#f0ece4' }}>{dadosAluno?.aluno?.usuarios?.nome || alunoSel.usuarios?.nome}</div>
-            <div style={{ fontSize: 11, color: '#9a9590' }}>{alunoSel.mentorias?.nome}</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', overflowX: 'auto', gap: 0 }}>
-          {TABS_ALUNO.map((t, i) => (
-            <button key={i} onClick={() => setTabAluno(i)}
-              style={{ padding: '8px 12px', fontSize: 11, color: tabAluno === i ? '#c8a97a' : '#5a5550', background: 'none', border: 'none', borderBottom: tabAluno === i ? '1.5px solid #c8a97a' : '1.5px solid transparent', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'DM Sans',sans-serif" }}>
-              {t}
-            </button>
-          ))}
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <div className="topbar">
+        <div className="tlogo">CA</div>
+        <div className="tright">
+          <div style={{ fontSize: 12, color: 'var(--text2)' }}>Claudio Alecrim</div>
+          <div className="avatar" style={{ background: 'var(--adim)', color: 'var(--amber)' }}>CA</div>
+          <button className="exit-btn" onClick={onLogout}>Sair</button>
         </div>
       </div>
+      <div className="tabs">
+        {TABS_MENTOR.map((t, i) => (
+          <div key={i} className={`tab${tab === i ? ' active' : ''}`} onClick={() => setTab(i)}>
+            {t}{i === 0 && msgDot && <div className="tab-dot show" />}
+          </div>
+        ))}
+      </div>
+      <div className="content">
 
-      <div style={{ padding: '16px' }}>
-        {loadingAluno ? (
-          <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" /></div>
-        ) : (
+        {/* VISÃO GERAL */}
+        {tab === 0 && (
           <>
-            {/* CONTROLE */}
-            {tabAluno === 0 && (
-              <div>
-                <div style={s.card}>
-                  <div style={s.label}>Acesso ao portal</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                    <div style={{ fontSize: 13, color: aluno?.acesso_ativo ? '#64c864' : '#c45a5a' }}>
-                      {aluno?.acesso_ativo ? '● Ativo' : '● Suspenso'}
-                    </div>
-                    <button onClick={toggleAcesso}
-                      style={{ fontSize: 12, background: aluno?.acesso_ativo ? 'rgba(196,90,90,.1)' : 'rgba(100,200,100,.1)', border: `.5px solid ${aluno?.acesso_ativo ? 'rgba(196,90,90,.3)' : 'rgba(100,200,100,.3)'}`, borderRadius: 8, padding: '6px 14px', color: aluno?.acesso_ativo ? '#c45a5a' : '#64c864', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                      {aluno?.acesso_ativo ? 'Suspender' : 'Reativar'}
-                    </button>
-                  </div>
-                </div>
-
-                <div style={s.card}>
-                  <div style={s.label}>Progresso</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <div style={{ fontSize: 13, color: '#f0ece4' }}>{aluno?.mentorias?.nome}</div>
-                    <div style={{ fontSize: 13, color: '#c8a97a' }}>{aluno?.progresso || 0}%</div>
-                  </div>
-                  <div style={{ height: 4, background: '#2a2a2a', borderRadius: 2 }}>
-                    <div style={{ height: 4, background: '#c8a97a', borderRadius: 2, width: `${aluno?.progresso || 0}%` }} />
-                  </div>
-                </div>
-
-                {/* Ferramentas */}
-                <div style={{ fontSize: 11, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>Ferramentas</div>
-                {ferramentas?.map(fa => (
-                  <div key={fa.id} style={{ ...s.card, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 13, color: '#f0ece4' }}>{fa.ferramentas?.nome}</div>
-                    <button onClick={() => toggleFerramenta(fa.ferramenta_id, !fa.habilitada)}
-                      style={{ fontSize: 11, background: fa.habilitada ? 'rgba(100,200,100,.1)' : 'rgba(255,255,255,.05)', border: `.5px solid ${fa.habilitada ? 'rgba(100,200,100,.3)' : 'rgba(255,255,255,.1)'}`, borderRadius: 6, padding: '4px 10px', color: fa.habilitada ? '#64c864' : '#5a5550', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                      {fa.habilitada ? 'Ativa' : 'Inativa'}
-                    </button>
+            <div className="card">
+              <div className="card-title">Painel</div>
+              <div className="card-sub">Visão consolidada</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9, marginTop: 10 }}>
+                {[
+                  { label: 'Ativos', val: alunos.filter(a => a.acesso_ativo).length, color: 'var(--amber)' },
+                  { label: 'Em dia', val: alunos.filter(a => a.acesso_ativo && a.pagamento_status !== 'negado').length, color: 'var(--ok)' },
+                  { label: 'Inadimp.', val: inadimp.length, color: 'var(--err)' },
+                  { label: 'Inativos', val: alunos.filter(a => !a.acesso_ativo).length, color: 'var(--text2)' },
+                  { label: 'Mensagens', val: (overview?.mensagensNaoLidas || []).length, color: 'var(--amber)' },
+                  { label: 'Total hist.', val: alunos.length, color: 'var(--text2)' }
+                ].map(s => (
+                  <div key={s.label} className="stat-card">
+                    <div className="stat-num" style={{ color: s.color }}>{s.val}</div>
+                    <div className="stat-label">{s.label}</div>
                   </div>
                 ))}
               </div>
-            )}
+            </div>
+            <div className="card">
+              <div className="card-title">Buscar Aluno</div>
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--text3)' }}>⌕</span>
+                <input className="inp" style={{ paddingLeft: 34 }} placeholder="Nome do mentorado..." value={busca} onChange={e => setBusca(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 12 }}>
+                {alunosFiltrados.map(a => (
+                  <div key={a.id} className="li" onClick={() => abrirAluno(a)}>
+                    <div className="li-avatar">{initials(a.usuarios?.nome)}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{a.usuarios?.nome}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>{a.mentorias?.nome}</div>
+                      <div className="mini-bar"><div className="mini-fill" style={{ width: (a.progresso || 0) + '%' }} /></div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
+                      {a.pagamento_status === 'negado' && <span className="badge badge-red">Inadimp.</span>}
+                    </div>
+                  </div>
+                ))}
+                {alunosFiltrados.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhum aluno encontrado.</div>}
+              </div>
+            </div>
+          </>
+        )}
 
-            {/* FICHA — ALINHAMENTO DE EXPECTATIVAS */}
-            {tabAluno === 1 && (
-              <div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Alinhamento de Expectativas</div>
-                {alinhamento ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {[
-                      { label: 'Motivação', value: alinhamento.motivacao },
-                      { label: 'Resultado esperado', value: alinhamento.resultado_esperado },
-                      { label: 'Área de foco', value: alinhamento.area_foco },
-                      { label: 'Grande desafio', value: alinhamento.grande_desafio },
-                      { label: 'Principal obstáculo', value: alinhamento.obstaculo },
-                      { label: 'Satisfação atual', value: alinhamento.satisfacao_atual ? `${alinhamento.satisfacao_atual}/10` : null },
-                      { label: 'Tentativas anteriores', value: alinhamento.tentativas_anteriores },
-                      { label: 'Comprometimento', value: alinhamento.comprometimento },
-                      { label: 'Visão ideal', value: alinhamento.visao_ideal },
-                      { label: 'Informação adicional', value: alinhamento.info_adicional },
-                      { label: 'Telefone', value: alinhamento.telefone },
-                    ].filter(item => item.value).map((item, i) => (
-                      <div key={i} style={s.card}>
-                        <div style={s.label}>{item.label}</div>
-                        <div style={{ fontSize: 13, color: '#f0ece4', lineHeight: 1.6 }}>{item.value}</div>
+        {/* MENTORIAS */}
+        {tab === 1 && (
+          <>
+            {!mentoriaDetalhe ? (
+              <>
+                <div className="card">
+                  <div className="card-title">Minhas Mentorias</div>
+                  <div className="card-sub">Clique para gerenciar</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+                    {mentorias.map(m => (
+                      <div key={m.id} className="li" onClick={() => setMentoriaDetalhe(m)}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{m.nome}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text3)' }}>{(m.alunos || []).length} aluno(s) · {(m.encontros_template || []).length} encontros</div>
+                        </div>
+                        <span style={{ color: 'var(--text3)' }}>›</span>
                       </div>
                     ))}
-                    <div style={{ fontSize: 11, color: '#5a5550', textAlign: 'right' }}>
-                      Preenchido em {new Date(alinhamento.preenchido_em).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}
-                    </div>
+                    {mentorias.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhuma mentoria cadastrada.</div>}
                   </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 40 }}>
-                    Aluno ainda não preencheu o alinhamento de expectativas.
+                </div>
+                <div className="card">
+                  <div className="card-title">Nova Mentoria</div>
+                  <div className="fg" style={{ marginTop: 10 }}><div className="fl">Nome</div><input className="inp" placeholder="Ex: Mentoria Avançada" value={novaMentoriaNome} onChange={e => setNovaMentoriaNome(e.target.value)} /></div>
+                  <div className="fg">
+                    <div className="fl">Nº de Encontros</div>
+                    <input className="inp" type="number" min="1" max="20" placeholder="8" value={novaMentoriaQtd}
+                      onChange={e => {
+                        const n = parseInt(e.target.value) || 0
+                        setNovaMentoriaQtd(e.target.value)
+                        setNovaMentoriaEncs(Array.from({ length: n }, (_, i) => ({ nome: novaMentoriaEncs[i]?.nome || '' })))
+                      }} />
                   </div>
-                )}
-              </div>
-            )}
-
-            {/* ENCONTROS */}
-            {tabAluno === 2 && (
-              <div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Encontros</div>
-                {encontros?.map(enc => (
-                  <EncontroCard key={enc.id} enc={enc} onAtualizar={atualizarEncontro} s={s} />
-                ))}
-              </div>
-            )}
-
-            {/* TAREFAS */}
-            {tabAluno === 3 && (
-              <div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Tarefas</div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                  <input value={novaTarefa} onChange={e => setNovaTarefa(e.target.value)}
-                    placeholder="Nova tarefa para o aluno..."
-                    onKeyDown={e => e.key === 'Enter' && adicionarTarefa()}
-                    style={s.inp} />
-                  <button onClick={adicionarTarefa}
-                    style={{ background: '#c8a97a', border: 'none', borderRadius: 8, padding: '0 16px', color: '#0a0a0a', fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", whiteSpace: 'nowrap' }}>
-                    + Adicionar
-                  </button>
+                  {novaMentoriaEncs.length > 0 && (
+                    <>
+                      <div className="divider" />
+                      <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>Nome de cada encontro</div>
+                      {novaMentoriaEncs.map((enc, i) => (
+                        <div key={i} className="enc-edit-row">
+                          <div className="enc-edit-num">{i + 1}</div>
+                          <input className="enc-edit-inp" placeholder={`Encontro ${i + 1}`} value={enc.nome}
+                            onChange={e => setNovaMentoriaEncs(prev => prev.map((x, j) => j === i ? { nome: e.target.value } : x))} />
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  <button className="btn btn-amber btn-full" style={{ marginTop: 8 }} onClick={criarMentoria}>+ Criar Mentoria</button>
                 </div>
-                {tarefas?.map(t => (
-                  <div key={t.id} style={{ ...s.card, opacity: t.concluida ? .6 : 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <div style={{ fontSize: 13, color: '#f0ece4', textDecoration: t.concluida ? 'line-through' : 'none' }}>{t.nome}</div>
-                      <div style={{ fontSize: 11, color: t.concluida ? '#64c864' : '#5a5550' }}>{t.concluida ? '✓ Concluída' : 'Pendente'}</div>
-                    </div>
-                    {t.resposta && <div style={{ fontSize: 12, color: '#9a9590', marginTop: 6, lineHeight: 1.5 }}>{t.resposta}</div>}
-                    {t.concluida_em && <div style={{ fontSize: 11, color: '#5a5550', marginTop: 4 }}>Concluída em {new Date(t.concluida_em).toLocaleDateString('pt-BR')}</div>}
-                  </div>
-                ))}
-                {!tarefas?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 30 }}>Nenhuma tarefa ainda.</div>}
-              </div>
-            )}
-
-            {/* MENSAGENS */}
-            {tabAluno === 4 && (
-              <div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                  {mensagens?.map(m => (
-                    <div key={m.id} style={{ display: 'flex', justifyContent: m.de === 'mentor' ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ maxWidth: '80%', background: m.de === 'mentor' ? 'rgba(200,169,122,.15)' : '#171717', border: `.5px solid ${m.de === 'mentor' ? 'rgba(200,169,122,.3)' : 'rgba(255,255,255,.07)'}`, borderRadius: 10, padding: '10px 14px' }}>
-                        <div style={{ fontSize: 10, color: '#5a5550', marginBottom: 4 }}>{m.de === 'mentor' ? 'Você' : aluno?.usuarios?.nome?.split(' ')[0]}</div>
-                        <div style={{ fontSize: 13, color: '#f0ece4', lineHeight: 1.5 }}>{m.texto}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {!mensagens?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 30 }}>Nenhuma mensagem ainda.</div>}
+              </>
+            ) : (
+              <div className="card">
+                <button className="back-btn" onClick={() => setMentoriaDetalhe(null)}>← Mentorias</button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div className="card-title">{mentoriaDetalhe.nome}</div>
+                  <button className="btn btn-red" style={{ fontSize: 10, padding: '5px 12px' }} onClick={() => excluirMentoria(mentoriaDetalhe.id)}>Excluir</button>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <textarea value={msgTexto} onChange={e => setMsgTexto(e.target.value)}
-                    placeholder="Mensagem para o aluno..."
-                    style={{ flex: 1, background: '#171717', border: '.5px solid rgba(255,255,255,.13)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#f0ece4', fontFamily: "'DM Sans',sans-serif", resize: 'none', minHeight: 60, outline: 'none' }} />
-                  <button onClick={enviarMensagem}
-                    style={{ background: '#c8a97a', border: 'none', borderRadius: 10, padding: '0 16px', color: '#0a0a0a', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                    Enviar
-                  </button>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14 }}>
+                  {(mentoriaDetalhe.alunos || []).length} aluno(s) · {(mentoriaDetalhe.encontros_template || []).length} encontros
                 </div>
-              </div>
-            )}
-
-            {/* FINANCEIRO */}
-            {tabAluno === 5 && (
-              <div>
-                <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Financeiro</div>
-                <div style={s.card}>
-                  <div style={s.label}>Forma de pagamento</div>
-                  <div style={{ fontSize: 13, color: '#f0ece4', textTransform: 'capitalize' }}>{aluno?.forma_pagamento || '—'}</div>
-                </div>
-                {aluno?.pagamento_status === 'negado' && (
-                  <div style={{ background: 'rgba(196,90,90,.1)', border: '.5px solid rgba(196,90,90,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, color: '#c45a5a' }}>⚠️ {aluno.pagamento_aviso}</div>
-                  </div>
-                )}
-                <div style={{ fontSize: 11, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>Parcelas</div>
-                {parcelas?.map(p => (
-                  <div key={p.id} style={{ ...s.card, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: 13, color: '#f0ece4' }}>Parcela {p.numero}</div>
-                      <div style={{ fontSize: 12, color: '#9a9590' }}>R$ {Number(p.valor).toFixed(2).replace('.', ',')}</div>
-                    </div>
-                    <div style={{ fontSize: 11, color: p.paga ? '#64c864' : '#c45a5a' }}>
-                      {p.paga ? '✓ Paga' : 'Em aberto'}
-                    </div>
+                <div className="divider" />
+                <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '10px 0' }}>Encontros</div>
+                {(mentoriaDetalhe.encontros_template || []).sort((a, b) => a.numero - b.numero).map((e, i) => (
+                  <div key={e.id || i} className="enc-edit-row">
+                    <div className="enc-edit-num">{e.numero}</div>
+                    <div style={{ flex: 1, fontSize: 13, color: 'var(--text2)', paddingLeft: 6 }}>{e.nome}</div>
                   </div>
                 ))}
-                {!parcelas?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 20 }}>Sem parcelas registradas.</div>}
+                <div className="divider" />
+                <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '10px 0' }}>Alunos</div>
+                {(mentoriaDetalhe.alunos || []).length === 0
+                  ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhum aluno nesta mentoria.</div>
+                  : (mentoriaDetalhe.alunos || []).map(a => (
+                    <div key={a.id} className="li" onClick={() => abrirAluno(a)}>
+                      <div className="li-avatar">{initials(a.usuarios?.nome)}</div>
+                      <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 500 }}>{a.usuarios?.nome}</div></div>
+                    </div>
+                  ))
+                }
               </div>
             )}
           </>
         )}
-      </div>
-    </div>
-  )
-}
 
-function EncontroCard({ enc, onAtualizar, s }) {
-  const [editando, setEditando] = useState(false)
-  const [resumo, setResumo] = useState(enc.resumo || '')
-  const [data, setData] = useState(enc.proximo_agendado ? enc.proximo_agendado.slice(0, 16) : '')
-  const [status, setStatus] = useState(enc.status)
-
-  const salvar = async () => {
-    await onAtualizar(enc.id, { resumo, status, proximo_agendado: data || null })
-    setEditando(false)
-  }
-
-  return (
-    <div style={{ ...s.card, borderColor: enc.status === 'nxt' ? 'rgba(200,169,122,.2)' : 'rgba(255,255,255,.07)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div style={{ fontSize: 11, color: '#5a5550' }}>Encontro {enc.numero}</div>
-        <button onClick={() => setEditando(!editando)}
-          style={{ fontSize: 11, color: '#c8a97a', background: 'none', border: 'none', cursor: 'pointer' }}>
-          {editando ? 'Cancelar' : 'Editar'}
-        </button>
-      </div>
-      <div style={{ fontSize: 14, color: '#f0ece4', marginBottom: 8 }}>{enc.nome}</div>
-
-      {!editando ? (
-        <>
-          {enc.resumo && <div style={{ fontSize: 12, color: '#9a9590', lineHeight: 1.5, marginBottom: 6 }}>{enc.resumo}</div>}
-          {enc.proximo_agendado && (
-            <div style={{ fontSize: 11, color: '#c8a97a' }}>📅 {new Date(enc.proximo_agendado).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</div>
-          )}
-          <div style={{ marginTop: 6, fontSize: 11, color: enc.status === 'done' ? '#64c864' : enc.status === 'nxt' ? '#c8a97a' : '#5a5550' }}>
-            {enc.status === 'done' ? '✓ Concluído' : enc.status === 'nxt' ? '→ Próximo' : 'Pendente'}
+        {/* FERRAMENTAS */}
+        {tab === 2 && (
+          <div className="card">
+            <div className="card-title">Ferramentas do Ecossistema</div>
+            <div className="card-sub">Ativas globalmente</div>
+            <div style={{ marginTop: 12 }}>
+              {ferramentasGlobal.map((f, i) => (
+                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: i < ferramentasGlobal.length - 1 ? '.5px solid var(--border)' : 'none' }}>
+                  <span style={{ flex: 1, fontSize: 13 }}>{f.nome}</span>
+                  <div className={`toggle${f.ativo_global ? ' on' : ''}`} onClick={() => toggleFerramentaGlobal(f)} />
+                </div>
+              ))}
+            </div>
           </div>
-        </>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...s.inp, padding: '6px 10px' }}>
-            <option value="pend">Pendente</option>
-            <option value="nxt">Próximo</option>
-            <option value="done">Concluído</option>
-          </select>
-          <input type="datetime-local" value={data} onChange={e => setData(e.target.value)} style={{ ...s.inp, padding: '6px 10px' }} />
-          <textarea value={resumo} onChange={e => setResumo(e.target.value)}
-            placeholder="Resumo do encontro..."
-            style={{ ...s.inp, minHeight: 70, resize: 'vertical' }} />
-          <button onClick={salvar}
-            style={{ background: '#c8a97a', border: 'none', borderRadius: 8, padding: '8px', color: '#0a0a0a', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-            Salvar
-          </button>
-        </div>
-      )}
+        )}
+
+        {/* ALUNOS */}
+        {tab === 3 && (
+          <div className="card">
+            <div className="card-title">Todos os Alunos</div>
+            <div className="card-sub">Histórico completo de mentorados</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
+              {alunos.map(a => (
+                <div key={a.id} className="li" onClick={() => abrirAluno(a)}>
+                  <div className="li-avatar">{initials(a.usuarios?.nome)}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{a.usuarios?.nome}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)' }}>{a.usuarios?.email}</div>
+                    <div className="mini-bar"><div className="mini-fill" style={{ width: (a.progresso || 0) + '%' }} /></div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                    <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
+                    {a.pagamento_status === 'negado' && <span className="badge badge-red">Inadimp.</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   )
 }
