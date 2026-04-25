@@ -1,338 +1,312 @@
+// src/pages/DashAluno.jsx
 import { useState, useEffect } from 'react'
-import Mensagens from '../components/Mensagens.jsx'
 
 const TABS = ['Início', 'Encontros', 'Tarefas', 'Ferramentas', 'Financeiro', 'Mensagens']
 
-export default function DashAluno({ user, onLogout, showPush }) {
+export default function DashAluno({ user, onLogout }) {
   const [tab, setTab] = useState(0)
   const [dados, setDados] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [encDetalhe, setEncDetalhe] = useState(null)
-  const [taskResposta, setTaskResposta] = useState({})
-  const [msgDot, setMsgDot] = useState(false)
-  const [aviseTexto, setAviseTexto] = useState('')
+  const [msg, setMsg] = useState('')
+  const [enviando, setEnviando] = useState(false)
 
-  const alunoId = user?.aluno?.id
+  useEffect(() => { carregarDados() }, [])
 
-  const carregar = async () => {
-    if (!alunoId) return
+  const carregarDados = async () => {
+    setLoading(true)
     try {
-      const res = await fetch(`/api/aluno?action=dados&aluno_id=${alunoId}`)
-      const data = await res.json()
-      setDados(data)
-      const naoLidas = (data.mensagens || []).filter(m => m.de === 'mentor' && !m.lida)
-      setMsgDot(naoLidas.length > 0)
-    } catch {} finally { setLoading(false) }
+      const r = await fetch(`/api/aluno?action=dados&usuario_id=${user.id}`)
+      const d = await r.json()
+      setDados(d)
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
   }
 
-  useEffect(() => { carregar() }, [alunoId])
-
-  const marcarFeita = async (tarefa) => {
-    const resposta = taskResposta[tarefa.id] || ''
-    if (!resposta.trim()) { alert('Escreva uma resposta antes de marcar como feita.'); return }
-    try {
-      await fetch('/api/aluno?action=tarefa-concluir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tarefa_id: tarefa.id, resposta })
-      })
-      carregar()
-    } catch {}
+  const enviarMensagem = async () => {
+    if (!msg.trim()) return
+    setEnviando(true)
+    await fetch('/api/aluno?action=mensagem', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aluno_id: dados?.aluno?.id, texto: msg })
+    })
+    setMsg('')
+    await carregarDados()
+    setEnviando(false)
   }
 
-  const enviarAvise = async () => {
-    if (!aviseTexto.trim() || !alunoId) return
-    try {
-      await fetch('/api/aluno?action=mensagem-enviar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aluno_id: alunoId, de: 'aluno', texto: aviseTexto.trim() })
-      })
-      setAviseTexto('')
-      alert('Mensagem enviada ao seu mentor!')
-    } catch {}
+  const concluirTarefa = async (tarefa_id, resposta) => {
+    await fetch('/api/aluno?action=concluir-tarefa', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tarefa_id, resposta })
+    })
+    await carregarDados()
   }
 
-  const proxEnc = dados?.encontros?.find(e => e.status === 'nxt')
-  const formatDt = (d, h) => {
-    if (!d) return '—'
-    const dt = new Date(d + 'T12:00:00')
-    return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }) + (h ? ' · ' + h.slice(0,5) : '')
-  }
+  const s = { card: { background: '#111', border: '.5px solid rgba(255,255,255,.07)', borderRadius: 12, padding: '20px 18px', marginBottom: 12 }, label: { fontSize: 10, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }, value: { fontSize: 14, color: '#f0ece4' }, amber: { color: '#c8a97a' } }
 
-  if (loading) return <div className="loading"><div className="spinner" /></div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0a0a0a' }}><div className="spinner" /></div>
 
-  const aluno = dados?.aluno
-  const encontros = dados?.encontros || []
-  const tarefas = dados?.tarefas || []
-  const ferramentas = dados?.ferramentas || []
-  const parcelas = dados?.parcelas || []
-  const progresso = aluno?.progresso || 0
-  const mentoriaNome = aluno?.mentorias?.nome || user?.aluno?.mentorias?.nome || 'Mentoria'
-  const initials = user.nome?.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()
-
-  const tarefasAbertas = tarefas.filter(t => !t.concluida)
-  const tarefasConcluidas = tarefas.filter(t => t.concluida)
+  const { aluno, encontros, tarefas, mensagens, ferramentas, parcelas, alinhamento } = dados || {}
+  const pagamentoStatus = aluno?.pagamento_status
+  const formaP = aluno?.forma_pagamento
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <div className="topbar">
-        <div className="tlogo">CA</div>
-        <div className="tright">
-          <div style={{ fontSize: 12, color: 'var(--text2)' }}>{user.nome}</div>
-          <div className="avatar">{initials}</div>
-          <button className="exit-btn" onClick={onLogout}>Sair</button>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', paddingBottom: 80 }}>
+      {/* Header */}
+      <div style={{ background: '#0a0a0a', borderBottom: '.5px solid rgba(255,255,255,.07)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div>
+          <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#c8a97a' }}>Claudio Alecrim</div>
+          <div style={{ fontSize: 11, color: '#5a5550' }}>{aluno?.mentorias?.nome}</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ fontSize: 12, color: '#9a9590' }}>{user.nome}</div>
+          <button onClick={onLogout} style={{ fontSize: 11, color: '#5a5550', background: 'none', border: 'none', cursor: 'pointer' }}>Sair</button>
         </div>
       </div>
 
-      <div className="tabs">
+      {/* Aviso de pagamento negado */}
+      {pagamentoStatus === 'negado' && (
+        <div style={{ background: 'rgba(196,90,90,.1)', border: '.5px solid rgba(196,90,90,.4)', margin: '12px 16px', borderRadius: 10, padding: '12px 16px', fontSize: 13, color: '#c45a5a' }}>
+          ⚠️ {aluno?.pagamento_aviso}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', overflowX: 'auto', borderBottom: '.5px solid rgba(255,255,255,.07)', padding: '0 16px' }}>
         {TABS.map((t, i) => (
-          <div key={i} className={`tab${tab === i ? ' active' : ''}`} onClick={() => { setTab(i); if (i === 5) setMsgDot(false) }}>
+          <button key={i} onClick={() => setTab(i)} style={{ padding: '12px 14px', fontSize: 12, color: tab === i ? '#c8a97a' : '#5a5550', background: 'none', border: 'none', borderBottom: tab === i ? '1.5px solid #c8a97a' : '1.5px solid transparent', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'DM Sans',sans-serif" }}>
             {t}
-            {i === 5 && <div className={`tab-dot${msgDot ? ' show' : ''}`} />}
-          </div>
+          </button>
         ))}
       </div>
 
-      <div className="content">
+      <div style={{ padding: '20px 16px' }}>
 
         {/* INÍCIO */}
         {tab === 0 && (
-          <>
-            <div className="card">
-              <div className="card-title">{mentoriaNome}</div>
-              <div className="card-sub">Processo de {encontros.length} encontros</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: 'var(--text2)' }}>Evolução do processo</span>
-                <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 24, color: 'var(--amber)' }}>{progresso}%</span>
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 22, color: '#f0ece4', marginBottom: 4 }}>
+              Olá, {user.nome.split(' ')[0]}
+            </div>
+            <div style={{ fontSize: 13, color: '#9a9590', marginBottom: 24 }}>Bem-vindo ao seu portal de mentoria.</div>
+
+            {/* Progresso */}
+            <div style={s.card}>
+              <div style={s.label}>Seu progresso</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: '#f0ece4' }}>{aluno?.mentorias?.nome}</div>
+                <div style={{ fontSize: 13, color: '#c8a97a' }}>{aluno?.progresso || 0}%</div>
               </div>
-              <div className="pbar"><div className="pfill" style={{ width: progresso + '%' }} /></div>
+              <div style={{ height: 4, background: '#2a2a2a', borderRadius: 2 }}>
+                <div style={{ height: 4, background: '#c8a97a', borderRadius: 2, width: `${aluno?.progresso || 0}%`, transition: 'width .5s' }} />
+              </div>
             </div>
 
-            {proxEnc && (
-              <div className="card">
-                <div className="card-title">Próximo Encontro</div>
-                <div className="next-enc-card">
-                  <div className="next-enc-label">Confirmado pelo mentor</div>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>{proxEnc.proximo_nome || proxEnc.nome}</div>
-                  <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, color: 'var(--text2)' }}>📅 {formatDt(proxEnc.proximo_data, proxEnc.proximo_hora)}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text2)' }}>{proxEnc.proximo_modalidade === 'online' ? '🔗 Online' : '📍 Presencial'}</span>
+            {/* Próximo encontro */}
+            {encontros?.find(e => e.status === 'nxt') && (
+              <div style={{ ...s.card, border: '.5px solid rgba(200,169,122,.2)' }}>
+                <div style={s.label}>Próximo encontro</div>
+                <div style={{ fontSize: 15, color: '#c8a97a', fontFamily: "'Cormorant Garamond',serif", marginBottom: 4 }}>
+                  {encontros.find(e => e.status === 'nxt')?.nome}
+                </div>
+                {encontros.find(e => e.status === 'nxt')?.proximo_agendado && (
+                  <div style={{ fontSize: 12, color: '#9a9590' }}>
+                    {new Date(encontros.find(e => e.status === 'nxt').proximo_agendado).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}
                   </div>
-                  {proxEnc.proximo_modalidade === 'online' && proxEnc.proximo_link && (
-                    <div style={{ marginTop: 8 }}>
-                      <a href={proxEnc.proximo_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--amber)', border: '.5px solid rgba(200,169,122,.3)', borderRadius: 6, padding: '4px 10px', textDecoration: 'none' }}>
-                        Acessar link da reunião →
-                      </a>
-                    </div>
-                  )}
-                  {proxEnc.proximo_modalidade === 'presencial' && proxEnc.proximo_endereco && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text2)' }}>📍 {proxEnc.proximo_endereco}</div>
-                  )}
+                )}
+              </div>
+            )}
+
+            {/* Tarefas pendentes */}
+            {tarefas?.filter(t => !t.concluida).length > 0 && (
+              <div style={s.card}>
+                <div style={s.label}>Tarefas pendentes</div>
+                <div style={{ fontSize: 24, color: '#c8a97a', fontWeight: 500 }}>{tarefas.filter(t => !t.concluida).length}</div>
+              </div>
+            )}
+
+            {/* Mensagens não lidas */}
+            {mensagens?.filter(m => m.de === 'mentor' && !m.lida).length > 0 && (
+              <div style={{ ...s.card, border: '.5px solid rgba(200,169,122,.3)' }}>
+                <div style={{ fontSize: 13, color: '#c8a97a' }}>
+                  💬 {mensagens.filter(m => m.de === 'mentor' && !m.lida).length} mensagem(ns) nova(s) do mentor
                 </div>
               </div>
             )}
-
-            <div className="card">
-              <div className="card-title">Avise seu Mentor</div>
-              <div className="card-sub">Envie uma mensagem direta ao Claudio</div>
-              <textarea className="inp" placeholder="Escreva sua mensagem..." style={{ marginBottom: 10, minHeight: 80 }} value={aviseTexto} onChange={e => setAviseTexto(e.target.value)} />
-              <button className="avise-btn" onClick={enviarAvise}>Enviar mensagem ao mentor</button>
-            </div>
-
-            {tarefasAbertas.length > 0 && (
-              <div className="card">
-                <div className="card-title">Tarefas em Aberto</div>
-                <div className="card-sub">{tarefasAbertas.length} pendente{tarefasAbertas.length > 1 ? 's' : ''}</div>
-                {tarefasAbertas.slice(0, 3).map(t => (
-                  <div key={t.id} className="task-item">
-                    <div className="task-check" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13 }}>{t.nome}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{t.tipo === 'pdf' ? '📄 PDF' : '✏️ Texto'}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
+          </div>
         )}
 
         {/* ENCONTROS */}
         {tab === 1 && (
-          <>
-            {!encDetalhe ? (
-              <div className="card">
-                <div className="card-title">Encontros do Processo</div>
-                <div className="card-sub">{mentoriaNome} · {encontros.length} encontros</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
-                  {encontros.map(e => (
-                    <div key={e.id} className="enc-item" onClick={() => e.status === 'done' && setEncDetalhe(e)}>
-                      <div className={`enc-num ${e.status}`}>{e.numero}</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{e.nome}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text3)' }}>{e.data_realizada ? new Date(e.data_realizada + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</div>
-                      </div>
-                      {e.status === 'done' && <span className="badge badge-green">Feito</span>}
-                      {e.status === 'nxt' && <span className="badge badge-amber">Próximo</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="card">
-                <button className="back-btn" onClick={() => setEncDetalhe(null)}>← Voltar</button>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <div className="card-title">Encontro {encDetalhe.numero}</div>
-                  <span className="badge badge-green">Concluído</span>
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--amber)', fontFamily: "'Cormorant Garamond',serif", fontWeight: 500, marginBottom: 3 }}>{encDetalhe.nome}</div>
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14 }}>{encDetalhe.data_realizada ? new Date(encDetalhe.data_realizada + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</div>
-                <div className="divider" />
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text3)', marginBottom: 8 }}>Resumo</div>
-                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>{encDetalhe.resumo || '—'}</div>
-                </div>
-                {encDetalhe.ferramentas && (
-                  <div style={{ marginTop: 14 }}>
-                    <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text3)', marginBottom: 8 }}>Ferramentas Aplicadas</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {encDetalhe.ferramentas.split(',').map((f, i) => <span key={i} className="badge badge-amber">{f.trim()}</span>)}
-                    </div>
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Seus Encontros</div>
+            {encontros?.map(enc => (
+              <div key={enc.id} style={{ ...s.card, opacity: enc.status === 'done' ? .6 : 1, borderColor: enc.status === 'nxt' ? 'rgba(200,169,122,.3)' : 'rgba(255,255,255,.07)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, color: '#5a5550' }}>Encontro {enc.numero}</div>
+                  <div style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: enc.status === 'done' ? 'rgba(100,200,100,.1)' : enc.status === 'nxt' ? 'rgba(200,169,122,.1)' : 'rgba(255,255,255,.05)', color: enc.status === 'done' ? '#64c864' : enc.status === 'nxt' ? '#c8a97a' : '#5a5550' }}>
+                    {enc.status === 'done' ? 'Concluído' : enc.status === 'nxt' ? 'Próximo' : 'Pendente'}
                   </div>
-                )}
-                {encDetalhe.tarefas_texto && (
-                  <div style={{ marginTop: 14 }}>
-                    <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text3)', marginBottom: 8 }}>Tarefas</div>
-                    <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>{encDetalhe.tarefas_texto}</div>
+                </div>
+                <div style={{ fontSize: 14, color: '#f0ece4', marginBottom: enc.resumo ? 8 : 0 }}>{enc.nome}</div>
+                {enc.resumo && <div style={{ fontSize: 12, color: '#9a9590', lineHeight: 1.5 }}>{enc.resumo}</div>}
+                {enc.proximo_agendado && enc.status === 'nxt' && (
+                  <div style={{ fontSize: 11, color: '#c8a97a', marginTop: 6 }}>
+                    📅 {new Date(enc.proximo_agendado).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 )}
               </div>
-            )}
-          </>
+            ))}
+            {!encontros?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 40 }}>Seus encontros aparecerão aqui.</div>}
+          </div>
         )}
 
         {/* TAREFAS */}
         {tab === 2 && (
-          <div className="card">
-            <div className="card-title">Minhas Tarefas</div>
-            <div className="card-sub">Tarefas concluídas não podem ser desfeitas</div>
-            {tarefasAbertas.length > 0 && (
-              <>
-                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text3)', margin: '10px 0 8px' }}>Em aberto</div>
-                {tarefasAbertas.map(t => (
-                  <div key={t.id} className="task-item">
-                    <div className="task-check" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, marginBottom: 4 }}>{t.nome}</div>
-                      {t.tipo === 'pdf' ? (
-                        t.arquivo_url
-                          ? <a href={t.arquivo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--amber)', border: '.5px solid rgba(200,169,122,.3)', borderRadius: 5, padding: '3px 9px', textDecoration: 'none' }}>↓ Baixar PDF</a>
-                          : <span style={{ fontSize: 11, color: 'var(--text3)' }}>📄 Arquivo pendente</span>
-                      ) : (
-                        <>
-                          <textarea className="inp" style={{ minHeight: 60, marginTop: 4, fontSize: 12 }} placeholder="Escreva sua resposta..."
-                            value={taskResposta[t.id] || ''}
-                            onChange={e => setTaskResposta(prev => ({ ...prev, [t.id]: e.target.value }))}
-                          />
-                          <button className="btn btn-amber" style={{ fontSize: 11, padding: '5px 12px', marginTop: 5 }} onClick={() => marcarFeita(t)}>
-                            Marcar como feita
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-            {tarefasConcluidas.length > 0 && (
-              <>
-                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text3)', margin: '14px 0 8px' }}>Concluídas</div>
-                {tarefasConcluidas.map(t => (
-                  <div key={t.id} className="task-item">
-                    <div className="task-check done" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, color: 'var(--text3)' }}>{t.nome}</div>
-                      {t.resposta && <div style={{ fontSize: 12, color: 'var(--text2)', background: 'var(--bg3)', borderRadius: 6, padding: 8, lineHeight: 1.5, marginTop: 6 }}>{t.resposta}</div>}
-                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>
-                        Concluído · {t.concluida_em ? new Date(t.concluida_em).toLocaleDateString('pt-BR') + ' · ' + new Date(t.concluida_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-            {tarefas.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 20 }}>Nenhuma tarefa atribuída ainda.</div>}
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Suas Tarefas</div>
+            {tarefas?.map(t => (
+              <div key={t.id} style={{ ...s.card, opacity: t.concluida ? .5 : 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 14, color: t.concluida ? '#5a5550' : '#f0ece4', textDecoration: t.concluida ? 'line-through' : 'none' }}>{t.nome}</div>
+                  {t.concluida && <div style={{ fontSize: 11, color: '#64c864' }}>✓ Concluída</div>}
+                </div>
+                {!t.concluida && (
+                  <TarefaForm tarefa={t} onConcluir={concluirTarefa} />
+                )}
+                {t.concluida && t.resposta && (
+                  <div style={{ fontSize: 12, color: '#9a9590', marginTop: 4 }}>{t.resposta}</div>
+                )}
+              </div>
+            ))}
+            {!tarefas?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 40 }}>Nenhuma tarefa ainda.</div>}
           </div>
         )}
 
         {/* FERRAMENTAS */}
         {tab === 3 && (
-          <div className="card">
-            <div className="card-title">Ferramentas</div>
-            <div className="card-sub">Liberadas pelo mentor</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, marginTop: 10 }}>
-              {ferramentas.map(fa => {
-                const f = fa.ferramentas
-                const habilitada = fa.habilitada && f?.ativo_global
-                return (
-                  <div key={fa.id} style={{
-                    background: 'var(--bg3)', border: '.5px solid var(--border)', borderRadius: 'var(--r)',
-                    padding: 13, cursor: habilitada ? 'pointer' : 'not-allowed', opacity: habilitada ? 1 : 0.4,
-                    transition: 'all .2s'
-                  }}
-                    onMouseOver={e => habilitada && (e.currentTarget.style.borderColor = 'var(--amber)')}
-                    onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}
-                    onClick={() => habilitada && f?.url && (window.location.href = f.url)}
-                  >
-                    <div style={{ fontSize: 16, marginBottom: 6 }}>◉</div>
-                    <div style={{ fontSize: 12, fontWeight: 500 }}>{f?.nome}</div>
-                    <div style={{ marginTop: 4 }}>
-                      <span className={habilitada ? 'badge badge-green' : 'badge badge-gray'}>
-                        {habilitada ? 'Disponível' : 'Bloqueada'}
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Ferramentas</div>
+            {ferramentas?.map(fa => (
+              <a key={fa.id} href={fa.ferramentas?.url} target="_blank" rel="noreferrer"
+                style={{ ...s.card, display: 'block', textDecoration: 'none', cursor: 'pointer' }}>
+                <div style={{ fontSize: 14, color: '#c8a97a' }}>{fa.ferramentas?.nome}</div>
+                <div style={{ fontSize: 11, color: '#5a5550', marginTop: 4 }}>Clique para acessar →</div>
+              </a>
+            ))}
+            {!ferramentas?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 40 }}>Nenhuma ferramenta disponível ainda.</div>}
           </div>
         )}
 
         {/* FINANCEIRO */}
         {tab === 4 && (
-          <div className="card">
-            <div className="card-title">Financeiro</div>
-            <div className="card-sub">{parcelas.length} parcelas</div>
-            <div style={{ background: 'var(--bg3)', border: '.5px solid var(--border)', borderRadius: 'var(--r)', padding: 13 }}>
-              {parcelas.map((p, i) => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < parcelas.length - 1 ? '.5px solid var(--border)' : 'none' }}>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>Parcela {p.numero}/{parcelas.length}</div>
-                    <div style={{ fontSize: 10, color: p.paga ? 'var(--text3)' : 'var(--warn)' }}>
-                      {p.vencimento ? new Date(p.vencimento + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
-                      {p.valor ? ` · R$ ${Number(p.valor).toFixed(2)}` : ''}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-                    <span className={p.paga ? 'badge badge-green' : 'badge badge-amber'}>{p.paga ? 'Pago' : 'Pendente'}</span>
-                    {!p.paga && p.boleto_url && (
-                      <a href={p.boleto_url} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--amber)', border: '.5px solid rgba(200,169,122,.3)', borderRadius: 5, padding: '3px 8px', textDecoration: 'none' }}>↓ Boleto</a>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {parcelas.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhuma parcela cadastrada.</div>}
-            </div>
-          </div>
+          <FinanceiroAluno aluno={aluno} parcelas={parcelas} />
         )}
 
         {/* MENSAGENS */}
-        {tab === 5 && alunoId && (
-          <Mensagens alunoId={alunoId} perspectiva="aluno" onNovaMensagem={() => {}} />
+        {tab === 5 && (
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Mensagens</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+              {mensagens?.map(m => (
+                <div key={m.id} style={{ display: 'flex', justifyContent: m.de === 'aluno' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{ maxWidth: '80%', background: m.de === 'aluno' ? 'rgba(200,169,122,.15)' : '#171717', border: `.5px solid ${m.de === 'aluno' ? 'rgba(200,169,122,.3)' : 'rgba(255,255,255,.07)'}`, borderRadius: 10, padding: '10px 14px' }}>
+                    <div style={{ fontSize: 10, color: '#5a5550', marginBottom: 4 }}>{m.de === 'mentor' ? 'Claudio' : 'Você'}</div>
+                    <div style={{ fontSize: 13, color: '#f0ece4', lineHeight: 1.5 }}>{m.texto}</div>
+                  </div>
+                </div>
+              ))}
+              {!mensagens?.length && <div style={{ fontSize: 13, color: '#5a5550', textAlign: 'center', padding: 30 }}>Nenhuma mensagem ainda.</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <textarea value={msg} onChange={e => setMsg(e.target.value)}
+                placeholder="Escreva uma mensagem para seu mentor..."
+                style={{ flex: 1, background: '#171717', border: '.5px solid rgba(255,255,255,.13)', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#f0ece4', fontFamily: "'DM Sans',sans-serif", resize: 'none', minHeight: 60, outline: 'none' }} />
+              <button onClick={enviarMensagem} disabled={enviando || !msg.trim()}
+                style={{ background: '#c8a97a', border: 'none', borderRadius: 10, padding: '0 18px', color: '#0a0a0a', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: enviando ? .7 : 1, fontFamily: "'DM Sans',sans-serif" }}>
+                Enviar
+              </button>
+            </div>
+          </div>
         )}
-
       </div>
+    </div>
+  )
+}
+
+function TarefaForm({ tarefa, onConcluir }) {
+  const [resposta, setResposta] = useState('')
+  return (
+    <div>
+      <textarea value={resposta} onChange={e => setResposta(e.target.value)}
+        placeholder="Escreva sua resposta ou reflexão..."
+        style={{ width: '100%', background: '#0a0a0a', border: '.5px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#f0ece4', fontFamily: "'DM Sans',sans-serif", resize: 'none', minHeight: 60, outline: 'none', boxSizing: 'border-box' }} />
+      <button onClick={() => onConcluir(tarefa.id, resposta)}
+        style={{ marginTop: 8, background: 'rgba(200,169,122,.12)', border: '.5px solid rgba(200,169,122,.3)', borderRadius: 8, padding: '8px 16px', fontSize: 12, color: '#c8a97a', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+        Marcar como concluída
+      </button>
+    </div>
+  )
+}
+
+function FinanceiroAluno({ aluno, parcelas }) {
+  const formaP = aluno?.forma_pagamento
+  const isPago = formaP === 'cartao' || formaP === 'pix'
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 18, color: '#f0ece4', marginBottom: 16 }}>Financeiro</div>
+
+      {/* Status geral */}
+      <div style={{ background: '#111', border: `.5px solid ${isPago ? 'rgba(100,200,100,.2)' : 'rgba(200,169,122,.2)'}`, borderRadius: 12, padding: '18px 16px', marginBottom: 16 }}>
+        <div style={{ fontSize: 11, color: '#5a5550', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>Status do pagamento</div>
+        {isPago ? (
+          <div>
+            <div style={{ fontSize: 16, color: '#64c864', marginBottom: 4 }}>✓ Mentoria paga</div>
+            <div style={{ fontSize: 12, color: '#9a9590' }}>
+              Pagamento realizado via {formaP === 'cartao' ? 'cartão de crédito' : 'Pix'}.
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 14, color: '#c8a97a', marginBottom: 4 }}>Pagamento via boleto</div>
+            <div style={{ fontSize: 12, color: '#9a9590' }}>Seus boletos estão disponíveis abaixo.</div>
+          </div>
+        )}
+      </div>
+
+      {/* Boletos — apenas se for boleto */}
+      {formaP === 'boleto' && (
+        <div>
+          <div style={{ fontSize: 12, color: '#5a5550', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.08em' }}>Parcelas</div>
+          {parcelas?.map(p => (
+            <div key={p.id} style={{ background: '#111', border: `.5px solid ${p.paga ? 'rgba(100,200,100,.2)' : 'rgba(255,255,255,.07)'}`, borderRadius: 10, padding: '14px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 13, color: '#f0ece4', marginBottom: 2 }}>Parcela {p.numero}</div>
+                <div style={{ fontSize: 12, color: '#9a9590' }}>
+                  R$ {Number(p.valor).toFixed(2).replace('.', ',')}
+                  {p.vencimento && ` · Vence ${new Date(p.vencimento).toLocaleDateString('pt-BR')}`}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {p.paga ? (
+                  <div style={{ fontSize: 11, color: '#64c864' }}>✓ Paga</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: '#c45a5a' }}>Em aberto</div>
+                    {p.boleto_url && (
+                      <a href={p.boleto_url} target="_blank" rel="noreferrer"
+                        style={{ fontSize: 11, background: 'rgba(200,169,122,.12)', border: '.5px solid rgba(200,169,122,.3)', borderRadius: 6, padding: '4px 10px', color: '#c8a97a', textDecoration: 'none' }}>
+                        Baixar
+                      </a>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
