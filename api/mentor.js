@@ -119,6 +119,20 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true })
   }
 
+  // ─── SALVAR MÓDULOS DA MENTORIA ───
+  if (action === 'mentoria-modulos-salvar' && req.method === 'POST') {
+    const { mentoria_id, modulos } = body
+    // Deleta todos os templates existentes
+    await supabase.from('encontros_template').delete().eq('mentoria_id', mentoria_id)
+    // Recria com a nova lista
+    if (modulos?.length) {
+      await supabase.from('encontros_template').insert(
+        modulos.map((m, i) => ({ mentoria_id, numero: i + 1, nome: m.nome || `Módulo ${i + 1}` }))
+      )
+    }
+    return res.status(200).json({ ok: true })
+  }
+
   // ─── CRIAR MENTORIA ───
   if (action === 'mentoria-criar' && req.method === 'POST') {
     const { nome, encontros } = body
