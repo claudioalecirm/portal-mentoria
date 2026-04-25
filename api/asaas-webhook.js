@@ -1,4 +1,4 @@
-// api/asaas-webhook.js — v7
+// api/asaas-webhook.js — versão segura, sem chave hardcoded
 import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
 import crypto from 'crypto'
@@ -6,14 +6,13 @@ import crypto from 'crypto'
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-const ASAAS_KEY = process.env.ASAAS_API_KEY || '$aact_hmlg_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OmVkMjljYjE0LWY4MDUtNDUxZi1hZmRiLTY2NDcwMGJlNmI5NTo6JGFhY2hfNDdmNTEzOGMtNmM5Yy00MTZkLTg1ZDQtYjFmNjZkYzdjYmQ3'
-const ASAAS_URL = ASAAS_KEY.includes('hmlg')
+// Chave vem EXCLUSIVAMENTE da variável de ambiente do Vercel
+const ASAAS_KEY = process.env.ASAAS_API_KEY
+const ASAAS_URL = ASAAS_KEY?.includes('hmlg')
   ? 'https://sandbox.asaas.com/api/v3'
   : 'https://api.asaas.com/v3'
 
-// URL do portal — sempre dash.claudioalecrim.com.br
 const APP_URL = 'https://dash.claudioalecrim.com.br'
-
 const MENTOR_ID = '00000000-0000-0000-0000-000000000001'
 const PRODUTO_MENTORIA = {
   'governo-pessoal':  '10000000-0000-0000-0000-000000000001',
@@ -25,6 +24,11 @@ export const config = { api: { bodyParser: true } }
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
+  if (!ASAAS_KEY) {
+    console.log('[webhook] ERRO: ASAAS_API_KEY não configurada no Vercel')
+    return res.status(500).json({ error: 'Configuração ausente' })
+  }
+
   let body = req.body
   if (typeof body === 'string') {
     try { body = JSON.parse(body) } catch { body = {} }
@@ -32,14 +36,14 @@ export default async function handler(req, res) {
 
   const event = body?.event
   const payment = body?.payment
-  console.log('[v7] event:', event, '| customer:', payment?.customer)
+  console.log('[webhook] event:', event, '| customer:', payment?.customer)
 
   if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(event) && payment) {
     try { await handleConfirmado(payment) }
-    catch (e) { console.log('[v7] ERRO:', e.message, e.stack) }
+    catch (e) { console.log('[webhook] ERRO:', e.message) }
   } else if (['PAYMENT_OVERDUE', 'PAYMENT_DECLINED'].includes(event) && payment) {
     try { await handleNegado(payment, event) }
-    catch (e) { console.log('[v7] ERRO negado:', e.message) }
+    catch (e) { console.log('[webhook] ERRO negado:', e.message) }
   }
 
   res.status(200).json({ ok: true })
@@ -47,7 +51,7 @@ export default async function handler(req, res) {
 
 async function handleConfirmado(payment) {
   const cli = await buscarCliente(payment.customer)
-  if (!cli?.email) { console.log('[v7] PAROU: sem email'); return }
+  if (!cli?.email) { console.log('[webhook] PAROU: sem email'); return }
 
   const { nome, email, telefone } = cli
   const desc = (payment.description || '').toLowerCase()
@@ -65,7 +69,7 @@ async function handleConfirmado(payment) {
     const { data: u, error: e } = await supabase.from('usuarios')
       .insert({ nome, email, senha_hash: 'pendente', role: 'aluno', ativo: true })
       .select().single()
-    console.log('[v7] novo usuário:', u?.id, 'erro:', e?.message)
+    console.log('[webhook] novo usuário:', u?.id, 'erro:', e?.message)
     usuarioId = u?.id
   }
 
@@ -74,7 +78,7 @@ async function handleConfirmado(payment) {
   const { data: alunoExiste } = await supabase.from('alunos').select('id').eq('usuario_id', usuarioId).single()
   if (alunoExiste) {
     await supabase.from('alunos').update({ pagamento_status: 'ok', pagamento_aviso: null }).eq('id', alunoExiste.id)
-    console.log('[v7] aluno já existe — pagamento atualizado')
+    await supabase.from('parcelas').update({ paga: true }).eq('aluno_id', alunoExiste.id).eq('numero', payment.installmentNumber || 1)
     return
   }
 
@@ -87,7 +91,7 @@ async function handleConfirmado(payment) {
     onboarding_token: token, onboarding_concluido: false
   }).select().single()
 
-  console.log('[v7] novo aluno:', novoAluno?.id, 'erro:', errAluno?.message)
+  console.log('[webhook] novo aluno:', novoAluno?.id, 'erro:', errAluno?.message)
   if (!novoAluno?.id) return
 
   const { data: proc } = await supabase.from('processos')
@@ -117,9 +121,8 @@ async function handleConfirmado(payment) {
   const link = `${APP_URL}/cadastro?token=${token}`
   const m = mentoriaId === PRODUTO_MENTORIA['homem-espiritual'] ? 'Homem Espiritual' : 'Governo Pessoal'
 
-  console.log('[v7] enviando email para:', email, '| link:', link.slice(0, 80))
-
-  const emailResult = await resend.emails.send({
+  console.log('[webhook] enviando email para:', email)
+  await resend.emails.send({
     from: 'Claudio Alecrim <noreply@claudioalecrim.com.br>',
     to: email,
     subject: `Bem-vindo à ${m} — Complete seu cadastro`,
@@ -130,15 +133,15 @@ async function handleConfirmado(payment) {
           <div style="font-size:11px;color:#5a5550;letter-spacing:.2em;text-transform:uppercase;margin-top:4px">Portal de Mentoria</div>
         </div>
         <div style="background:#fff;padding:36px 40px">
-          <p style="font-size:16px;color:#111;margin-bottom:8px">Olá, <strong>${nome}</strong>!</p>
-          <p style="font-size:14px;color:#555;margin-bottom:24px;line-height:1.7">
+          <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
+          <p style="font-size:14px;color:#555;line-height:1.7">
             Seu pagamento da <strong style="color:#c8a97a">${m}</strong> foi confirmado.<br/>
             Clique abaixo para preencher o alinhamento de expectativas e criar seu acesso.
           </p>
-          <a href="${link}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin-bottom:24px">
+          <a href="${link}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">
             Completar meu cadastro →
           </a>
-          <div style="background:#fafafa;border-radius:8px;padding:14px 18px;margin-bottom:8px">
+          <div style="background:#fafafa;border-radius:8px;padding:14px 18px">
             <div style="font-size:12px;color:#888;margin-bottom:4px">Após o cadastro, acesse sempre pelo endereço:</div>
             <a href="${APP_URL}" style="color:#c8a97a;font-size:14px;font-weight:500;text-decoration:none">${APP_URL}</a>
           </div>
@@ -150,7 +153,6 @@ async function handleConfirmado(payment) {
       </div>
     `
   })
-  console.log('[v7] email:', JSON.stringify(emailResult))
 
   await fetch(`${APP_URL}/api/push-send`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -178,11 +180,10 @@ async function buscarCliente(customerId) {
       headers: { 'access_token': ASAAS_KEY }
     })
     const c = await r.json()
-    console.log('[v7] cliente status:', r.status, '| email:', c.email)
     if (!c.email) return null
     return { nome: c.name || 'Aluno', email: c.email.toLowerCase().trim(), telefone: c.mobilePhone || '' }
   } catch (e) {
-    console.log('[v7] buscarCliente ERRO:', e.message)
+    console.log('[webhook] buscarCliente ERRO:', e.message)
     return null
   }
 }
