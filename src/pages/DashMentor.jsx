@@ -15,6 +15,8 @@ export default function DashMentor({ user, onLogout, showPush }) {
   const [editEnc, setEditEnc] = useState(null)
   const [modSel, setModSel] = useState('online')
   const [mentoriaDetalhe, setMentoriaDetalhe] = useState(null)
+  const [editandoModulos, setEditandoModulos] = useState(false)
+  const [modulosEdit, setModulosEdit] = useState([])
   const [msgDot, setMsgDot] = useState(false)
   const [novaMentoriaNome, setNovaMentoriaNome] = useState('')
   const [novaMentoriaQtd, setNovaMentoriaQtd] = useState('')
@@ -133,8 +135,18 @@ export default function DashMentor({ user, onLogout, showPush }) {
     carregarOverview()
   }
 
-  const excluirMentoria = async (id) => {
-    if (!confirm('Excluir esta mentoria?')) return
+  const salvarModulos = async () => {
+    await fetch('/api/mentor?action=mentoria-modulos-salvar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mentoria_id: mentoriaDetalhe.id, modulos: modulosEdit })
+    })
+    setEditandoModulos(false)
+    await carregarOverview()
+    // Atualiza detalhe local
+    setMentoriaDetalhe(prev => ({ ...prev, encontros_template: modulosEdit }))
+  }
+
+  const excluirMentoria = async (id) => {    if (!confirm('Excluir esta mentoria?')) return
     await fetch('/api/mentor?action=mentoria-excluir', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mentoria_id: id })
@@ -573,13 +585,47 @@ export default function DashMentor({ user, onLogout, showPush }) {
                   {(mentoriaDetalhe.alunos || []).length} aluno(s) · {(mentoriaDetalhe.encontros_template || []).length} encontros
                 </div>
                 <div className="divider" />
-                <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '10px 0' }}>Encontros</div>
-                {(mentoriaDetalhe.encontros_template || []).sort((a, b) => a.numero - b.numero).map((e, i) => (
-                  <div key={e.id || i} className="enc-edit-row">
-                    <div className="enc-edit-num">{e.numero}</div>
-                    <div style={{ flex: 1, fontSize: 13, color: 'var(--text2)', paddingLeft: 6 }}>{e.nome}</div>
-                  </div>
-                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Módulos</div>
+                  {!editandoModulos ? (
+                    <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                      onClick={() => { setModulosEdit([...(mentoriaDetalhe.encontros_template || []).sort((a,b) => a.numero - b.numero)]); setEditandoModulos(true) }}>
+                      Editar módulos
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setEditandoModulos(false)}>Cancelar</button>
+                      <button className="btn btn-amber" style={{ fontSize: 11, padding: '4px 10px' }} onClick={salvarModulos}>Salvar</button>
+                    </div>
+                  )}
+                </div>
+
+                {!editandoModulos ? (
+                  // VISUALIZAÇÃO
+                  (mentoriaDetalhe.encontros_template || []).sort((a, b) => a.numero - b.numero).map((e, i) => (
+                    <div key={e.id || i} className="enc-edit-row">
+                      <div className="enc-edit-num">{e.numero}</div>
+                      <div style={{ flex: 1, fontSize: 13, color: 'var(--text2)', paddingLeft: 6 }}>{e.nome}</div>
+                    </div>
+                  ))
+                ) : (
+                  // EDIÇÃO
+                  <>
+                    {modulosEdit.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <div className="enc-edit-num">{i + 1}</div>
+                        <input className="enc-edit-inp" style={{ flex: 1 }} value={e.nome}
+                          onChange={ev => setModulosEdit(prev => prev.map((x, j) => j === i ? { ...x, nome: ev.target.value } : x))} />
+                        <button onClick={() => setModulosEdit(prev => prev.filter((_, j) => j !== i))}
+                          style={{ fontSize: 16, color: 'var(--err)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                    <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 6, width: '100%' }}
+                      onClick={() => setModulosEdit(prev => [...prev, { id: null, numero: prev.length + 1, nome: '' }])}>
+                      + Adicionar módulo
+                    </button>
+                  </>
+                )}
                 <div className="divider" />
                 <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '10px 0' }}>Alunos</div>
                 {(mentoriaDetalhe.alunos || []).length === 0
