@@ -1,8 +1,7 @@
 // api/kiwify-webhook.js
-// Recebe eventos de compra da Kiwify e cadastra alunos automaticamente
-import { createClient } from '@supabase/supabase-js'
-import { Resend } from 'resend'
-import crypto from 'crypto'
+const { createClient } = require('@supabase/supabase-js')
+const { Resend } = require('resend')
+const crypto = require('crypto')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -10,17 +9,14 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 const APP_URL = 'https://dash.claudioalecrim.com.br'
 const MENTOR_ID = '00000000-0000-0000-0000-000000000001'
 
-// Mapeamento: nome do produto Kiwify → mentoria_id no banco
 const PRODUTO_MAP = {
-  'mesa do reino':          '10000000-0000-0000-0000-000000000003',
-  'mentoria governo pessoal': '10000000-0000-0000-0000-000000000001',
+  'mesa do reino':             '10000000-0000-0000-0000-000000000003',
+  'mentoria governo pessoal':  '10000000-0000-0000-0000-000000000001',
   'mentoria homem espiritual': '10000000-0000-0000-0000-000000000002',
 }
 const MENTORIA_MESA = '10000000-0000-0000-0000-000000000003'
 
-export const config = { api: { bodyParser: true } }
-
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
   let body = req.body
@@ -28,7 +24,7 @@ export default async function handler(req, res) {
     try { body = JSON.parse(body) } catch { body = {} }
   }
 
-  // Validação do token Kiwify (opcional mas recomendado)
+  // Validação do token Kiwify
   const tokenKiwify = process.env.KIWIFY_WEBHOOK_TOKEN
   if (tokenKiwify) {
     const tokenRecebido = req.headers['x-kiwify-token'] || req.query.token
@@ -39,9 +35,8 @@ export default async function handler(req, res) {
   }
 
   const status = body?.order_status
-  console.log('[kiwify] event:', status, '| produto:', body?.Product?.name)
+  console.log('[kiwify] status:', status, '| produto:', body?.Product?.name)
 
-  // Só processa compras aprovadas e assinaturas renovadas
   if (!['paid', 'subscription_renewed'].includes(status)) {
     console.log('[kiwify] ignorado:', status)
     return res.status(200).json({ ok: true, ignorado: true })
@@ -57,100 +52,78 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, aviso: 'sem email' })
   }
 
-  // Identifica mentoria pelo nome do produto
+  // Identifica mentoria
   let mentoriaId = null
   for (const [chave, id] of Object.entries(PRODUTO_MAP)) {
     if (nomeProduto.includes(chave)) { mentoriaId = id; break }
   }
-
   if (!mentoriaId) {
-    console.log('[kiwify] AVISO: produto não mapeado:', nomeProduto)
-    // Fallback: tenta identificar por palavras-chave
     if (nomeProduto.includes('mesa')) mentoriaId = PRODUTO_MAP['mesa do reino']
     else if (nomeProduto.includes('governo')) mentoriaId = PRODUTO_MAP['mentoria governo pessoal']
     else if (nomeProduto.includes('homem') || nomeProduto.includes('espiritual')) mentoriaId = PRODUTO_MAP['mentoria homem espiritual']
+    else mentoriaId = PRODUTO_MAP['mentoria homem espiritual'] // fallback
   }
 
   console.log('[kiwify] email:', email, '| mentoriaId:', mentoriaId)
 
-  // Verifica se usuário já existe
-  const { data: userExiste } = await supabase
-    .from('usuarios').select('id').eq('email', email).single()
-
+  // Verifica/cria usuário
+  const { data: userExiste } = await supabase.from('usuarios').select('id').eq('email', email).single()
   let usuarioId = userExiste?.id
 
-  // Cria usuário se não existe
   if (!usuarioId) {
-    const { data: novoUser, error: errUser } = await supabase
-      .from('usuarios')
+    const { data: novoUser, error: errUser } = await supabase.from('usuarios')
       .insert({ nome, email, senha_hash: 'pendente', role: 'aluno', ativo: true })
       .select().single()
     console.log('[kiwify] novo usuário:', novoUser?.id, 'erro:', errUser?.message)
     usuarioId = novoUser?.id
   }
 
-  if (!usuarioId) return res.status(200).json({ ok: true, aviso: 'erro ao criar usuário' })
+  if (!usuarioId) return res.status(200).json({ ok: true, aviso: 'erro usuario' })
 
-  // Verifica se aluno já tem acesso a esta mentoria
-  const { data: alunoExiste } = await supabase
-    .from('alunos')
-    .select('id, onboarding_concluido')
-    .eq('usuario_id', usuarioId)
-    .eq('mentoria_id', mentoriaId)
-    .single()
+  // Verifica se já tem acesso a esta mentoria
+  const { data: alunoExiste } = await supabase.from('alunos')
+    .select('id').eq('usuario_id', usuarioId).eq('mentoria_id', mentoriaId).single()
 
   if (alunoExiste) {
-    console.log('[kiwify] aluno já tem acesso a esta mentoria:', alunoExiste.id)
-    // Se assinatura renovada, garante que acesso está ativo
+    console.log('[kiwify] aluno já existe nesta mentoria')
     if (status === 'subscription_renewed') {
       await supabase.from('alunos').update({ acesso_ativo: true }).eq('id', alunoExiste.id)
     }
     return res.status(200).json({ ok: true, aviso: 'aluno_ja_existe' })
   }
 
-  // Gera token de onboarding
   const token = crypto.randomBytes(32).toString('hex')
   const isMesa = mentoriaId === MENTORIA_MESA
 
-  // Cria registro de aluno
-  const { data: novoAluno, error: errAluno } = await supabase
-    .from('alunos')
-    .insert({
-      usuario_id: usuarioId,
-      mentoria_id: mentoriaId,
-      progresso: 0,
-      acesso_ativo: true,
-      telefone,
-      pagamento_status: 'ok',
-      onboarding_token: isMesa ? null : token, // Mesa do Reino não tem onboarding
-      onboarding_concluido: isMesa ? true : false // Mesa do Reino entra direto
-    })
-    .select().single()
+  // Cria aluno
+  const { data: novoAluno, error: errAluno } = await supabase.from('alunos').insert({
+    usuario_id: usuarioId,
+    mentoria_id: mentoriaId,
+    progresso: 0,
+    acesso_ativo: true,
+    telefone,
+    pagamento_status: 'ok',
+    onboarding_token: isMesa ? null : token,
+    onboarding_concluido: isMesa ? true : false
+  }).select().single()
 
   console.log('[kiwify] novo aluno:', novoAluno?.id, 'erro:', errAluno?.message)
-  if (!novoAluno?.id) return res.status(200).json({ ok: true, aviso: 'erro ao criar aluno' })
+  if (!novoAluno?.id) return res.status(200).json({ ok: true, aviso: 'erro aluno' })
 
-  // Se é mentoria (não Mesa do Reino), cria processo + encontros + ferramentas
   if (!isMesa) {
-    const { data: proc } = await supabase
-      .from('processos')
+    // Cria processo + encontros + ferramentas
+    const { data: proc } = await supabase.from('processos')
       .insert({ aluno_id: novoAluno.id, mentoria_id: mentoriaId, status: 'ativo', progresso: 0 })
       .select().single()
 
-    const { data: templates } = await supabase
-      .from('encontros_template')
-      .select('numero, nome')
-      .eq('mentoria_id', mentoriaId)
-      .order('numero')
+    const { data: templates } = await supabase.from('encontros_template')
+      .select('numero, nome').eq('mentoria_id', mentoriaId).order('numero')
 
     if (templates?.length) {
       await supabase.from('encontros').insert(
         templates.map((t, i) => ({
-          aluno_id: novoAluno.id,
-          processo_id: proc?.id,
-          numero: t.numero,
-          nome: t.nome,
-          status: i === 0 ? 'nxt' : 'pend'
+          aluno_id: novoAluno.id, processo_id: proc?.id,
+          numero: t.numero, nome: t.nome, status: i === 0 ? 'nxt' : 'pend'
         }))
       )
     }
@@ -162,57 +135,46 @@ export default async function handler(req, res) {
       )
     }
 
-    // Mentorado ganha acesso à Mesa do Reino como bônus
-    const { data: temMesa } = await supabase
-      .from('alunos')
-      .select('id')
-      .eq('usuario_id', usuarioId)
-      .eq('mentoria_id', MENTORIA_MESA)
-      .single()
-
+    // Bônus: Mesa do Reino
+    const { data: temMesa } = await supabase.from('alunos')
+      .select('id').eq('usuario_id', usuarioId).eq('mentoria_id', MENTORIA_MESA).single()
     if (!temMesa) {
       await supabase.from('alunos').insert({
-        usuario_id: usuarioId,
-        mentoria_id: MENTORIA_MESA,
-        progresso: 0,
-        acesso_ativo: true,
-        onboarding_concluido: true
+        usuario_id: usuarioId, mentoria_id: MENTORIA_MESA,
+        progresso: 0, acesso_ativo: true, onboarding_concluido: true
       })
       console.log('[kiwify] Mesa do Reino liberada como bônus')
     }
   }
 
-  // Envia email apropriado
+  // Nomes dos produtos
   const mentoriaNome = nomeProduto.includes('governo') ? 'Mentoria Governo Pessoal'
     : nomeProduto.includes('espiritual') ? 'Mentoria Homem Espiritual'
     : 'Mesa do Reino'
 
+  // Envia email
   if (isMesa) {
-    // Mesa do Reino — envia acesso direto (sem onboarding)
-    await enviarEmailAcessoMesa(email, nome, mentoriaNome)
+    await enviarEmailAcessoMesa(email, nome)
   } else {
-    // Mentoria — envia link de onboarding
     const linkOnboarding = `${APP_URL}/cadastro?token=${token}`
     await enviarEmailOnboarding(email, nome, mentoriaNome, linkOnboarding)
   }
 
-  // Push para mentor
+  // Push mentor
   await fetch(`${APP_URL}/api/push-send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       usuario_id: MENTOR_ID,
       title: 'Nova venda — Kiwify',
       body: `${nome} · ${mentoriaNome}`,
-      tag: 'nova-venda',
-      url: '/'
+      tag: 'nova-venda', url: '/'
     })
   }).catch(() => {})
 
+  console.log('[kiwify] concluído para:', email)
   res.status(200).json({ ok: true, aluno_id: novoAluno.id })
 }
 
-// Email para mentoria — link de onboarding
 async function enviarEmailOnboarding(email, nome, mentoria, link) {
   await resend.emails.send({
     from: 'Claudio Alecrim <noreply@claudioalecrim.com.br>',
@@ -244,15 +206,14 @@ async function enviarEmailOnboarding(email, nome, mentoria, link) {
         </div>
       </div>
     `
-  }).catch(e => console.log('[kiwify] erro email onboarding:', e.message))
+  }).catch(e => console.log('[kiwify] erro email:', e.message))
 }
 
-// Email para Mesa do Reino — acesso direto
-async function enviarEmailAcessoMesa(email, nome, mentoria) {
+async function enviarEmailAcessoMesa(email, nome) {
   await resend.emails.send({
     from: 'Claudio Alecrim <noreply@claudioalecrim.com.br>',
     to: email,
-    subject: `Bem-vindo à Mesa do Reino — Acesse seu portal`,
+    subject: 'Bem-vindo à Mesa do Reino — Acesse seu portal',
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:0;background:#f5f5f5">
         <div style="background:#0a0a0a;padding:32px 40px;border-radius:12px 12px 0 0;text-align:center">
@@ -263,15 +224,15 @@ async function enviarEmailAcessoMesa(email, nome, mentoria) {
           <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
           <p style="font-size:14px;color:#555;line-height:1.7">
             Seu acesso à <strong style="color:#c8a97a">Mesa do Reino</strong> foi confirmado.<br/>
-            Para acessar o portal, você precisa criar sua senha. Clique abaixo:
+            Clique abaixo para acessar o portal e criar sua senha.
           </p>
           <a href="${APP_URL}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">
             Acessar o Portal →
           </a>
           <div style="background:#fafafa;border-radius:8px;padding:14px 18px;margin-bottom:16px">
-            <div style="font-size:12px;color:#888;margin-bottom:6px">Suas credenciais de acesso:</div>
+            <div style="font-size:12px;color:#888;margin-bottom:6px">Suas credenciais:</div>
             <div style="font-size:13px;color:#333;margin-bottom:4px"><strong>Login:</strong> ${email}</div>
-            <div style="font-size:12px;color:#888">Na primeira vez, clique em "Esqueci minha senha" para criar sua senha.</div>
+            <div style="font-size:12px;color:#888">Clique em "Esqueci minha senha" para criar sua senha no primeiro acesso.</div>
           </div>
           <p style="font-size:12px;color:#888;line-height:1.6">
             As cobranças são realizadas todo dia <strong>4 de cada mês</strong> pela Kiwify.
@@ -284,5 +245,3 @@ async function enviarEmailAcessoMesa(email, nome, mentoria) {
     `
   }).catch(e => console.log('[kiwify] erro email mesa:', e.message))
 }
-
-force deploy
