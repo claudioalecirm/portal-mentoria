@@ -284,3 +284,5 @@ async function enviarEmailAcessoMesa(email, nome, mentoria) {
     `
   }).catch(e => console.log('[kiwify] erro email mesa:', e.message))
 }
+
+force deploy
