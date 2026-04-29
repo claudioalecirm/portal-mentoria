@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import Mensagens from '../components/Mensagens.jsx'
 
-const TABS_MENTOR = ['Visão Geral', 'Mentorias', 'Ferramentas', 'Alunos']
-const TABS_ALUNO = ['Controle', 'Ficha', 'Encontros', 'Tarefas', 'Mensagens', 'Financeiro']
+const TABS_MENTOR = ['Visão Geral', 'Mentorias', 'Ferramentas', 'Alunos', 'Mesa do Reino']
+const TABS_ALUNO = ['Controle', 'Ficha', 'Encontros', 'Tarefas', 'Mensagens']
+const MENTORIA_MESA = '10000000-0000-0000-0000-000000000003'
 
 export default function DashMentor({ user, onLogout, showPush }) {
   const [tab, setTab] = useState(0)
@@ -26,6 +27,11 @@ export default function DashMentor({ user, onLogout, showPush }) {
   const [busca, setBusca] = useState('')
   const [pctLocal, setPctLocal] = useState(0)
   const [savingEnc, setSavingEnc] = useState(false)
+  // Mesa do Reino
+  const [mesaLink, setMesaLink] = useState('')
+  const [mesaLinkSalvo, setMesaLinkSalvo] = useState(null)
+  const [mesaDefinidoEm, setMesaDefinidoEm] = useState(null)
+  const [mesaSalvando, setMesaSalvando] = useState(false)
 
   const carregarOverview = async () => {
     try {
@@ -42,6 +48,15 @@ export default function DashMentor({ user, onLogout, showPush }) {
     } catch {}
   }
 
+  const carregarMesa = async () => {
+    try {
+      const r = await fetch('/api/mentor?action=mesa-config')
+      const d = await r.json()
+      setMesaLinkSalvo(d.link_zoom || null)
+      setMesaDefinidoEm(d.link_definido_em || null)
+    } catch {}
+  }
+
   const carregarAluno = async (aluno_id) => {
     try {
       const res = await fetch(`/api/mentor?action=aluno-dados&aluno_id=${aluno_id}`)
@@ -52,6 +67,7 @@ export default function DashMentor({ user, onLogout, showPush }) {
   }
 
   useEffect(() => { carregarOverview() }, [])
+  useEffect(() => { if (tab === 4) carregarMesa() }, [tab])
 
   const abrirAluno = async (aluno) => {
     setAlunoAtivo(aluno)
@@ -60,38 +76,24 @@ export default function DashMentor({ user, onLogout, showPush }) {
     await carregarAluno(aluno.id)
   }
 
-  const salvarProgresso = async (novoVal) => {
-    await fetch('/api/mentor?action=progresso', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoAtivo.id, progresso: novoVal })
-    })
+  const salvarProgresso = async (v) => {
+    await fetch('/api/mentor?action=progresso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aluno_id: alunoAtivo.id, progresso: v }) })
   }
 
   const toggleAcesso = async () => {
     const novoAtivo = !alunoData?.aluno?.acesso_ativo
-    await fetch('/api/mentor?action=acesso', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoAtivo.id, ativo: novoAtivo })
-    })
+    await fetch('/api/mentor?action=acesso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aluno_id: alunoAtivo.id, ativo: novoAtivo }) })
     carregarAluno(alunoAtivo.id)
   }
 
   const salvarEncontro = async () => {
     if (!editEnc) return
     setSavingEnc(true)
-    const payload = {
-      encontro_id: editEnc.id, aluno_id: alunoAtivo.id,
-      resumo: editEnc.resumo, ferramentas_aplicadas: editEnc.ferramentas,
-      tarefas_texto: editEnc.tarefas_texto,
-      proximo_nome: editEnc.proximo_nome, proximo_data: editEnc.proximo_data,
-      proximo_hora: editEnc.proximo_hora, proximo_modalidade: modSel,
-      proximo_link: editEnc.proximo_link, proximo_endereco: editEnc.proximo_endereco
-    }
     await fetch('/api/mentor?action=encontro-salvar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ encontro_id: editEnc.id, aluno_id: alunoAtivo.id, resumo: editEnc.resumo, ferramentas_aplicadas: editEnc.ferramentas, tarefas_texto: editEnc.tarefas_texto, proximo_nome: editEnc.proximo_nome, proximo_data: editEnc.proximo_data, proximo_hora: editEnc.proximo_hora, proximo_modalidade: modSel, proximo_link: editEnc.proximo_link, proximo_endereco: editEnc.proximo_endereco })
     })
-    setSavingEnc(false)
-    setEditEnc(null)
+    setSavingEnc(false); setEditEnc(null)
     carregarAluno(alunoAtivo.id)
     if (editEnc.proximo_data) {
       const dtFmt = new Date(editEnc.proximo_data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
@@ -101,73 +103,65 @@ export default function DashMentor({ user, onLogout, showPush }) {
 
   const adicionarTarefa = async () => {
     if (!taskNome.trim()) return
-    await fetch('/api/mentor?action=tarefa-adicionar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoAtivo.id, nome: taskNome, tipo: taskTipo })
-    })
-    setTaskNome('')
-    carregarAluno(alunoAtivo.id)
+    await fetch('/api/mentor?action=tarefa-adicionar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aluno_id: alunoAtivo.id, nome: taskNome, tipo: taskTipo }) })
+    setTaskNome(''); carregarAluno(alunoAtivo.id)
   }
 
   const toggleFerramenta = async (fa) => {
-    await fetch('/api/mentor?action=ferramenta-toggle', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aluno_id: alunoAtivo.id, ferramenta_id: fa.ferramenta_id || fa.ferramentas?.id, habilitada: !fa.habilitada })
-    })
+    await fetch('/api/mentor?action=ferramenta-toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aluno_id: alunoAtivo.id, ferramenta_id: fa.ferramenta_id || fa.ferramentas?.id, habilitada: !fa.habilitada }) })
     carregarAluno(alunoAtivo.id)
   }
 
   const toggleFerramentaGlobal = async (f) => {
-    await fetch('/api/mentor?action=ferramenta-global', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ferramenta_id: f.id, ativo: !f.ativo_global })
-    })
+    await fetch('/api/mentor?action=ferramenta-global', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ferramenta_id: f.id, ativo: !f.ativo_global }) })
     carregarOverview()
   }
 
   const criarMentoria = async () => {
     if (!novaMentoriaNome.trim() || novaMentoriaEncs.length === 0) return
-    await fetch('/api/mentor?action=mentoria-criar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome: novaMentoriaNome, encontros: novaMentoriaEncs.map(e => e.nome) })
-    })
+    await fetch('/api/mentor?action=mentoria-criar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: novaMentoriaNome, encontros: novaMentoriaEncs.map(e => e.nome) }) })
     setNovaMentoriaNome(''); setNovaMentoriaQtd(''); setNovaMentoriaEncs([])
     carregarOverview()
   }
 
+  const excluirMentoria = async (id) => {
+    if (!confirm('Excluir esta mentoria?')) return
+    await fetch('/api/mentor?action=mentoria-excluir', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mentoria_id: id }) })
+    setMentoriaDetalhe(null); carregarOverview()
+  }
+
   const salvarModulos = async () => {
-    await fetch('/api/mentor?action=mentoria-modulos-salvar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mentoria_id: mentoriaDetalhe.id, modulos: modulosEdit })
-    })
-    setEditandoModulos(false)
-    await carregarOverview()
-    // Atualiza detalhe local
+    await fetch('/api/mentor?action=mentoria-modulos-salvar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mentoria_id: mentoriaDetalhe.id, modulos: modulosEdit }) })
+    setEditandoModulos(false); await carregarOverview()
     setMentoriaDetalhe(prev => ({ ...prev, encontros_template: modulosEdit }))
   }
 
-  const excluirMentoria = async (id) => {    if (!confirm('Excluir esta mentoria?')) return
-    await fetch('/api/mentor?action=mentoria-excluir', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mentoria_id: id })
-    })
-    setMentoriaDetalhe(null)
-    carregarOverview()
+  const salvarLinkMesa = async () => {
+    if (!mesaLink.trim()) return
+    setMesaSalvando(true)
+    await fetch('/api/mentor?action=mesa-salvar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ link_zoom: mesaLink.trim() }) })
+    setMesaLink('')
+    await carregarMesa()
+    setMesaSalvando(false)
+    showPush('Mesa do Reino', 'Link do Zoom publicado para os participantes')
+  }
+
+  const limparLinkMesa = async () => {
+    await fetch('/api/mentor?action=mesa-limpar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+    setMesaLinkSalvo(null); setMesaDefinidoEm(null)
   }
 
   const alunos = overview?.alunos || []
-  const inadimp = alunos.filter(a => a.pagamento_status === 'negado' || a.pagamento_status === 'inadimplente')
   const alunosFiltrados = alunos.filter(a => a.usuarios?.nome?.toLowerCase().includes(busca.toLowerCase()))
   const initials = (nome) => nome?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
 
-  // VISÃO DO ALUNO ABERTO
+  // ── VISÃO DO ALUNO ABERTO ──
   if (alunoAtivo && alunoData) {
     const a = alunoData.aluno
     const encontros = alunoData.encontros || []
     const tarefas = alunoData.tarefas || []
     const mensagens = alunoData.mensagens || []
     const ferramentas = alunoData.ferramentas || []
-    const parcelas = alunoData.parcelas || []
     const alinhamento = alunoData.alinhamento || null
     const temMsgAluno = mensagens.some(m => m.de === 'aluno' && !m.lida)
 
@@ -190,7 +184,6 @@ export default function DashMentor({ user, onLogout, showPush }) {
         </div>
         <div className="content">
 
-          {/* CONTROLE */}
           {alunoTab === 0 && (
             <>
               <div className="card">
@@ -202,17 +195,9 @@ export default function DashMentor({ user, onLogout, showPush }) {
                 </div>
                 <div className="pbar"><div className="pfill" style={{ width: pctLocal + '%' }} /></div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  {[-5, -1].map(d => (
-                    <button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => {
-                      const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v)
-                    }}>{d}%</button>
-                  ))}
+                  {[-5, -1].map(d => (<button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => { const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v) }}>{d}%</button>))}
                   <span style={{ flex: 1 }} />
-                  {[1, 5].map(d => (
-                    <button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => {
-                      const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v)
-                    }}>+{d}%</button>
-                  ))}
+                  {[1, 5].map(d => (<button key={d} className="btn btn-ghost" style={{ padding: '6px 12px' }} onClick={() => { const v = Math.max(0, Math.min(100, pctLocal + d)); setPctLocal(v); salvarProgresso(v) }}>+{d}%</button>))}
                 </div>
               </div>
               <div className="card">
@@ -236,15 +221,13 @@ export default function DashMentor({ user, onLogout, showPush }) {
             </>
           )}
 
-          {/* FICHA — usa dados do alinhamento se disponível, senão dados diretos do aluno */}
           {alunoTab === 1 && (
             <div className="card">
               <div className="card-title">Diagnóstico Inicial</div>
               <div className="card-sub">Alinhamento de Expectativas</div>
               <div style={{ marginTop: 10 }}>
                 {[
-                  ['Nome', a?.usuarios?.nome],
-                  ['E-mail', a?.usuarios?.email],
+                  ['Nome', a?.usuarios?.nome], ['E-mail', a?.usuarios?.email],
                   ['Telefone', alinhamento?.telefone || a?.telefone],
                   ['Mentoria', a?.mentorias?.nome],
                   ['Motivação', alinhamento?.motivacao || a?.motivacao],
@@ -252,8 +235,7 @@ export default function DashMentor({ user, onLogout, showPush }) {
                   ['Área de foco', alinhamento?.area_foco || a?.area_foco],
                   ['Grande desafio', alinhamento?.grande_desafio || a?.grande_desafio],
                   ['Obstáculo', alinhamento?.obstaculo || a?.obstaculo],
-                  ['Satisfação atual', (alinhamento?.satisfacao_atual || a?.satisfacao_atual) != null
-                    ? (alinhamento?.satisfacao_atual || a?.satisfacao_atual) + '/10' : '—'],
+                  ['Satisfação atual', (alinhamento?.satisfacao_atual || a?.satisfacao_atual) != null ? (alinhamento?.satisfacao_atual || a?.satisfacao_atual) + '/10' : '—'],
                   ['Tentativas anteriores', alinhamento?.tentativas_anteriores || a?.tentativas_anteriores],
                   ['Comprometimento', alinhamento?.comprometimento || a?.comprometimento],
                   ['Visão ideal', alinhamento?.visao_ideal || a?.visao_ideal],
@@ -273,13 +255,12 @@ export default function DashMentor({ user, onLogout, showPush }) {
             </div>
           )}
 
-          {/* ENCONTROS */}
           {alunoTab === 2 && (
             <>
               {!editEnc ? (
                 <div className="card">
                   <div className="card-title">Encontros</div>
-                  <div className="card-sub">Clique para editar resumo e agendar próximo</div>
+                  <div className="card-sub">Clique para editar e agendar</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
                     {encontros.map(e => (
                       <div key={e.id} className="enc-item" onClick={() => { setEditEnc({ ...e }); setModSel(e.proximo_modalidade || 'online') }}>
@@ -300,24 +281,12 @@ export default function DashMentor({ user, onLogout, showPush }) {
                   <button className="back-btn" onClick={() => setEditEnc(null)}>← Encontros</button>
                   <div className="card-title">Encontro {editEnc.numero} — {editEnc.nome}</div>
                   <div className="card-sub" style={{ marginBottom: 16 }}>{editEnc.data_realizada || '—'}</div>
-                  <div className="fg">
-                    <div className="fl">Resumo <span style={{ color: 'var(--ok)', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>(visível ao aluno)</span></div>
-                    <textarea className="inp" value={editEnc.resumo || ''} onChange={e => setEditEnc(p => ({ ...p, resumo: e.target.value }))} placeholder="Resumo deste encontro..." />
-                  </div>
-                  <div className="fg">
-                    <div className="fl">Ferramentas Aplicadas</div>
-                    <input className="inp" value={editEnc.ferramentas || ''} onChange={e => setEditEnc(p => ({ ...p, ferramentas: e.target.value }))} placeholder="Ex: ATE, Código DNA" />
-                  </div>
-                  <div className="fg">
-                    <div className="fl">Tarefas</div>
-                    <textarea className="inp" style={{ minHeight: 60 }} value={editEnc.tarefas_texto || ''} onChange={e => setEditEnc(p => ({ ...p, tarefas_texto: e.target.value }))} placeholder="Tarefas atribuídas..." />
-                  </div>
+                  <div className="fg"><div className="fl">Resumo <span style={{ color: 'var(--ok)', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>(visível ao aluno)</span></div><textarea className="inp" value={editEnc.resumo || ''} onChange={e => setEditEnc(p => ({ ...p, resumo: e.target.value }))} placeholder="Resumo deste encontro..." /></div>
+                  <div className="fg"><div className="fl">Ferramentas Aplicadas</div><input className="inp" value={editEnc.ferramentas || ''} onChange={e => setEditEnc(p => ({ ...p, ferramentas: e.target.value }))} placeholder="Ex: ATE, Código DNA" /></div>
+                  <div className="fg"><div className="fl">Tarefas</div><textarea className="inp" style={{ minHeight: 60 }} value={editEnc.tarefas_texto || ''} onChange={e => setEditEnc(p => ({ ...p, tarefas_texto: e.target.value }))} placeholder="Tarefas atribuídas..." /></div>
                   <div className="divider" />
                   <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 15, color: 'var(--amber)', marginBottom: 12 }}>Próximo Encontro</div>
-                  <div className="fg">
-                    <div className="fl">Nome</div>
-                    <input className="inp" value={editEnc.proximo_nome || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_nome: e.target.value }))} placeholder="Ex: Governo da Vontade" />
-                  </div>
+                  <div className="fg"><div className="fl">Nome</div><input className="inp" value={editEnc.proximo_nome || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_nome: e.target.value }))} placeholder="Ex: Governo da Vontade" /></div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div className="fg"><div className="fl">Data</div><input className="inp" type="date" value={editEnc.proximo_data || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_data: e.target.value }))} /></div>
                     <div className="fg"><div className="fl">Horário</div><input className="inp" type="time" value={editEnc.proximo_hora || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_hora: e.target.value }))} /></div>
@@ -331,15 +300,12 @@ export default function DashMentor({ user, onLogout, showPush }) {
                   </div>
                   {modSel === 'online' && <div className="fg"><div className="fl">Link</div><input className="inp" value={editEnc.proximo_link || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_link: e.target.value }))} placeholder="https://meet.google.com/..." /></div>}
                   {modSel === 'presencial' && <div className="fg"><div className="fl">Endereço</div><input className="inp" value={editEnc.proximo_endereco || ''} onChange={e => setEditEnc(p => ({ ...p, proximo_endereco: e.target.value }))} placeholder="Rua, nº — bairro" /></div>}
-                  <button className="btn btn-amber btn-full" onClick={salvarEncontro} disabled={savingEnc}>
-                    {savingEnc ? 'Salvando...' : 'Salvar e Notificar Aluno'}
-                  </button>
+                  <button className="btn btn-amber btn-full" onClick={salvarEncontro} disabled={savingEnc}>{savingEnc ? 'Salvando...' : 'Salvar e Notificar Aluno'}</button>
                 </div>
               )}
             </>
           )}
 
-          {/* TAREFAS */}
           {alunoTab === 3 && (
             <>
               <div className="card">
@@ -356,20 +322,13 @@ export default function DashMentor({ user, onLogout, showPush }) {
               </div>
               <div className="card">
                 <div className="card-title">Relatório de Tarefas</div>
-                <div className="card-sub">Status em tempo real</div>
                 {tarefas.map(t => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '.5px solid var(--border)' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13 }}>{t.nome}</div>
                       <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{t.tipo === 'pdf' ? 'PDF' : 'Texto'}</div>
-                      {t.concluida && t.resposta && (
-                        <div style={{ fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', borderRadius: 5, padding: 6, marginTop: 6, lineHeight: 1.4 }}>"{t.resposta}"</div>
-                      )}
-                      {t.concluida && t.concluida_em && (
-                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3 }}>
-                          {new Date(t.concluida_em).toLocaleDateString('pt-BR')} · {new Date(t.concluida_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      )}
+                      {t.concluida && t.resposta && <div style={{ fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', borderRadius: 5, padding: 6, marginTop: 6, lineHeight: 1.4 }}>"{t.resposta}"</div>}
+                      {t.concluida && t.concluida_em && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3 }}>{new Date(t.concluida_em).toLocaleDateString('pt-BR')} · {new Date(t.concluida_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
                     </div>
                     <span className={t.concluida ? 'badge badge-green' : 'badge badge-gray'}>{t.concluida ? 'Feita' : 'Pendente'}</span>
                   </div>
@@ -379,76 +338,8 @@ export default function DashMentor({ user, onLogout, showPush }) {
             </>
           )}
 
-          {/* MENSAGENS */}
           {alunoTab === 4 && (
-            <Mensagens alunoId={alunoAtivo.id} perspectiva="mentor"
-              onNovaMensagem={() => showPush('Mensagem enviada', `Para: ${a?.usuarios?.nome}`)} />
-          )}
-
-          {/* FINANCEIRO */}
-          {alunoTab === 5 && (
-            <div className="card">
-              <div className="card-title">Financeiro</div>
-              <div className="card-sub">Status de pagamento</div>
-
-              {/* Aviso de inadimplência */}
-              {(a?.pagamento_status === 'negado' || a?.pagamento_status === 'inadimplente') && (
-                <div style={{ background: 'rgba(196,90,90,.1)', border: '.5px solid rgba(196,90,90,.3)', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 13, color: 'var(--err)' }}>
-                  ⚠️ {a?.pagamento_aviso || 'Pagamento em atraso.'}
-                </div>
-              )}
-
-              <div style={{ marginTop: 12 }}>
-                <div className="frow">
-                  <div className="flabel">Forma de pagamento</div>
-                  <div className="fval" style={{ textTransform: 'capitalize' }}>{a?.forma_pagamento || '—'}</div>
-                </div>
-                <div className="frow">
-                  <div className="flabel">Status</div>
-                  <div className="fval">
-                    {a?.pagamento_status === 'ok' || !a?.pagamento_status
-                      ? <span style={{ color: 'var(--ok)' }}>✓ Em dia</span>
-                      : <span style={{ color: 'var(--err)' }}>⚠ {a?.pagamento_status}</span>
-                    }
-                  </div>
-                </div>
-              </div>
-
-              {/* Cartão/Pix — mensagem pago */}
-              {(a?.forma_pagamento === 'cartao' || a?.forma_pagamento === 'pix') && (
-                <div style={{ background: 'rgba(100,200,100,.08)', border: '.5px solid rgba(100,200,100,.2)', borderRadius: 8, padding: '12px 14px', marginTop: 12, fontSize: 13, color: 'var(--ok)' }}>
-                  ✓ Mentoria paga via {a?.forma_pagamento === 'cartao' ? 'cartão de crédito' : 'Pix'}
-                </div>
-              )}
-
-              {/* Boleto — lista parcelas */}
-              {a?.forma_pagamento === 'boleto' && (
-                <>
-                  <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', margin: '14px 0 8px' }}>Parcelas</div>
-                  {parcelas.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Sem parcelas registradas.</div>}
-                  {parcelas.sort((a, b) => a.numero - b.numero).map(p => (
-                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '.5px solid var(--border)' }}>
-                      <div>
-                        <div style={{ fontSize: 13 }}>Parcela {p.numero}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                          R$ {Number(p.valor).toFixed(2).replace('.', ',')}
-                          {p.vencimento ? ` · vence ${new Date(p.vencimento).toLocaleDateString('pt-BR')}` : ''}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className={p.paga ? 'badge badge-green' : 'badge badge-red'}>{p.paga ? 'Paga' : 'Em aberto'}</span>
-                        {p.boleto_url && !p.paga && (
-                          <a href={p.boleto_url} target="_blank" rel="noreferrer"
-                            style={{ fontSize: 11, color: 'var(--amber)', textDecoration: 'none', border: '.5px solid var(--amber)', borderRadius: 4, padding: '3px 8px' }}>
-                            Boleto
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            <Mensagens alunoId={alunoAtivo.id} perspectiva="mentor" onNovaMensagem={() => showPush('Mensagem enviada', `Para: ${a?.usuarios?.nome}`)} />
           )}
 
         </div>
@@ -456,7 +347,7 @@ export default function DashMentor({ user, onLogout, showPush }) {
     )
   }
 
-  // DASH MENTOR PRINCIPAL
+  // ── DASH MENTOR PRINCIPAL ──
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <div className="topbar">
@@ -486,10 +377,10 @@ export default function DashMentor({ user, onLogout, showPush }) {
                 {[
                   { label: 'Ativos', val: alunos.filter(a => a.acesso_ativo).length, color: 'var(--amber)' },
                   { label: 'Em dia', val: alunos.filter(a => a.acesso_ativo && a.pagamento_status !== 'negado').length, color: 'var(--ok)' },
-                  { label: 'Inadimp.', val: inadimp.length, color: 'var(--err)' },
                   { label: 'Inativos', val: alunos.filter(a => !a.acesso_ativo).length, color: 'var(--text2)' },
+                  { label: 'Total', val: alunos.length, color: 'var(--text2)' },
                   { label: 'Mensagens', val: (overview?.mensagensNaoLidas || []).length, color: 'var(--amber)' },
-                  { label: 'Total hist.', val: alunos.length, color: 'var(--text2)' }
+                  { label: 'Tarefas', val: (overview?.tarefasPendentes || []).length, color: 'var(--text2)' }
                 ].map(s => (
                   <div key={s.label} className="stat-card">
                     <div className="stat-num" style={{ color: s.color }}>{s.val}</div>
@@ -513,10 +404,7 @@ export default function DashMentor({ user, onLogout, showPush }) {
                       <div style={{ fontSize: 10, color: 'var(--text3)' }}>{a.mentorias?.nome}</div>
                       <div className="mini-bar"><div className="mini-fill" style={{ width: (a.progresso || 0) + '%' }} /></div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                      <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
-                      {a.pagamento_status === 'negado' && <span className="badge badge-red">Inadimp.</span>}
-                    </div>
+                    <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
                   </div>
                 ))}
                 {alunosFiltrados.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhum aluno encontrado.</div>}
@@ -534,39 +422,33 @@ export default function DashMentor({ user, onLogout, showPush }) {
                   <div className="card-title">Minhas Mentorias</div>
                   <div className="card-sub">Clique para gerenciar</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-                    {mentorias.map(m => (
+                    {mentorias.filter(m => m.id !== MENTORIA_MESA).map(m => (
                       <div key={m.id} className="li" onClick={() => setMentoriaDetalhe(m)}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>{m.nome}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text3)' }}>{(m.alunos || []).length} aluno(s) · {(m.encontros_template || []).length} encontros</div>
+                          <div style={{ fontSize: 10, color: 'var(--text3)' }}>{(m.alunos || []).length} aluno(s) · {(m.encontros_template || []).length} módulos</div>
                         </div>
                         <span style={{ color: 'var(--text3)' }}>›</span>
                       </div>
                     ))}
-                    {mentorias.length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhuma mentoria cadastrada.</div>}
+                    {mentorias.filter(m => m.id !== MENTORIA_MESA).length === 0 && <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: 16 }}>Nenhuma mentoria cadastrada.</div>}
                   </div>
                 </div>
                 <div className="card">
                   <div className="card-title">Nova Mentoria</div>
                   <div className="fg" style={{ marginTop: 10 }}><div className="fl">Nome</div><input className="inp" placeholder="Ex: Mentoria Avançada" value={novaMentoriaNome} onChange={e => setNovaMentoriaNome(e.target.value)} /></div>
                   <div className="fg">
-                    <div className="fl">Nº de Encontros</div>
-                    <input className="inp" type="number" min="1" max="20" placeholder="8" value={novaMentoriaQtd}
-                      onChange={e => {
-                        const n = parseInt(e.target.value) || 0
-                        setNovaMentoriaQtd(e.target.value)
-                        setNovaMentoriaEncs(Array.from({ length: n }, (_, i) => ({ nome: novaMentoriaEncs[i]?.nome || '' })))
-                      }} />
+                    <div className="fl">Nº de Módulos</div>
+                    <input className="inp" type="number" min="1" max="20" placeholder="8" value={novaMentoriaQtd} onChange={e => { const n = parseInt(e.target.value) || 0; setNovaMentoriaQtd(e.target.value); setNovaMentoriaEncs(Array.from({ length: n }, (_, i) => ({ nome: novaMentoriaEncs[i]?.nome || '' }))) }} />
                   </div>
                   {novaMentoriaEncs.length > 0 && (
                     <>
                       <div className="divider" />
-                      <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>Nome de cada encontro</div>
+                      <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>Nome de cada módulo</div>
                       {novaMentoriaEncs.map((enc, i) => (
                         <div key={i} className="enc-edit-row">
                           <div className="enc-edit-num">{i + 1}</div>
-                          <input className="enc-edit-inp" placeholder={`Encontro ${i + 1}`} value={enc.nome}
-                            onChange={e => setNovaMentoriaEncs(prev => prev.map((x, j) => j === i ? { nome: e.target.value } : x))} />
+                          <input className="enc-edit-inp" placeholder={`Módulo ${i + 1}`} value={enc.nome} onChange={e => setNovaMentoriaEncs(prev => prev.map((x, j) => j === i ? { nome: e.target.value } : x))} />
                         </div>
                       ))}
                     </>
@@ -576,22 +458,17 @@ export default function DashMentor({ user, onLogout, showPush }) {
               </>
             ) : (
               <div className="card">
-                <button className="back-btn" onClick={() => setMentoriaDetalhe(null)}>← Mentorias</button>
+                <button className="back-btn" onClick={() => { setMentoriaDetalhe(null); setEditandoModulos(false) }}>← Mentorias</button>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <div className="card-title">{mentoriaDetalhe.nome}</div>
                   <button className="btn btn-red" style={{ fontSize: 10, padding: '5px 12px' }} onClick={() => excluirMentoria(mentoriaDetalhe.id)}>Excluir</button>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14 }}>
-                  {(mentoriaDetalhe.alunos || []).length} aluno(s) · {(mentoriaDetalhe.encontros_template || []).length} encontros
-                </div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14 }}>{(mentoriaDetalhe.alunos || []).length} aluno(s) · {(mentoriaDetalhe.encontros_template || []).length} módulos</div>
                 <div className="divider" />
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
                   <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Módulos</div>
                   {!editandoModulos ? (
-                    <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                      onClick={() => { setModulosEdit([...(mentoriaDetalhe.encontros_template || []).sort((a,b) => a.numero - b.numero)]); setEditandoModulos(true) }}>
-                      Editar módulos
-                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setModulosEdit([...(mentoriaDetalhe.encontros_template || []).sort((a, b) => a.numero - b.numero)]); setEditandoModulos(true) }}>Editar módulos</button>
                   ) : (
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setEditandoModulos(false)}>Cancelar</button>
@@ -599,9 +476,7 @@ export default function DashMentor({ user, onLogout, showPush }) {
                     </div>
                   )}
                 </div>
-
                 {!editandoModulos ? (
-                  // VISUALIZAÇÃO
                   (mentoriaDetalhe.encontros_template || []).sort((a, b) => a.numero - b.numero).map((e, i) => (
                     <div key={e.id || i} className="enc-edit-row">
                       <div className="enc-edit-num">{e.numero}</div>
@@ -609,21 +484,15 @@ export default function DashMentor({ user, onLogout, showPush }) {
                     </div>
                   ))
                 ) : (
-                  // EDIÇÃO
                   <>
                     {modulosEdit.map((e, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                         <div className="enc-edit-num">{i + 1}</div>
-                        <input className="enc-edit-inp" style={{ flex: 1 }} value={e.nome}
-                          onChange={ev => setModulosEdit(prev => prev.map((x, j) => j === i ? { ...x, nome: ev.target.value } : x))} />
-                        <button onClick={() => setModulosEdit(prev => prev.filter((_, j) => j !== i))}
-                          style={{ fontSize: 16, color: 'var(--err)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
+                        <input className="enc-edit-inp" style={{ flex: 1 }} value={e.nome} onChange={ev => setModulosEdit(prev => prev.map((x, j) => j === i ? { ...x, nome: ev.target.value } : x))} />
+                        <button onClick={() => setModulosEdit(prev => prev.filter((_, j) => j !== i))} style={{ fontSize: 16, color: 'var(--err)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}>×</button>
                       </div>
                     ))}
-                    <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 6, width: '100%' }}
-                      onClick={() => setModulosEdit(prev => [...prev, { id: null, numero: prev.length + 1, nome: '' }])}>
-                      + Adicionar módulo
-                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, marginTop: 6, width: '100%' }} onClick={() => setModulosEdit(prev => [...prev, { id: null, numero: prev.length + 1, nome: '' }])}>+ Adicionar módulo</button>
                   </>
                 )}
                 <div className="divider" />
@@ -672,12 +541,73 @@ export default function DashMentor({ user, onLogout, showPush }) {
                     <div style={{ fontSize: 10, color: 'var(--text3)' }}>{a.usuarios?.email}</div>
                     <div className="mini-bar"><div className="mini-fill" style={{ width: (a.progresso || 0) + '%' }} /></div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-                    <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
-                    {a.pagamento_status === 'negado' && <span className="badge badge-red">Inadimp.</span>}
-                  </div>
+                  <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* MESA DO REINO */}
+        {tab === 4 && (
+          <div>
+            <div className="card">
+              <div style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 20, color: 'var(--amber)', marginBottom: 4 }}>Mesa do Reino</div>
+              <div className="card-sub">Gerencie o link do Zoom para os participantes</div>
+
+              {/* Link ativo */}
+              {mesaLinkSalvo ? (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ background: 'rgba(100,200,100,.08)', border: '.5px solid rgba(100,200,100,.2)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>Link ativo agora</div>
+                    <a href={mesaLinkSalvo} target="_blank" rel="noreferrer" style={{ fontSize: 14, color: 'var(--ok)', wordBreak: 'break-all', textDecoration: 'none' }}>{mesaLinkSalvo}</a>
+                    {mesaDefinidoEm && (
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
+                        Definido às {new Date(mesaDefinidoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · expira em 2 horas
+                      </div>
+                    )}
+                  </div>
+                  <button className="btn btn-red btn-full" onClick={limparLinkMesa}>Limpar link agora</button>
+                </div>
+              ) : (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ background: 'rgba(255,255,255,.03)', border: '.5px solid var(--border)', borderRadius: 10, padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--text3)' }}>
+                    Nenhum link ativo no momento.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Campo para novo link */}
+            <div className="card">
+              <div className="card-title">Publicar novo link</div>
+              <div className="card-sub">O link aparece automaticamente para todos os participantes e expira em 2 horas</div>
+              <div className="fg" style={{ marginTop: 14 }}>
+                <div className="fl">Link do Zoom</div>
+                <input className="inp" placeholder="https://us05web.zoom.us/j/..." value={mesaLink} onChange={e => setMesaLink(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && salvarLinkMesa()} />
+              </div>
+              <button className="btn btn-amber btn-full" onClick={salvarLinkMesa} disabled={mesaSalvando || !mesaLink.trim()}>
+                {mesaSalvando ? 'Publicando...' : 'Publicar link'}
+              </button>
+            </div>
+
+            {/* Participantes Mesa do Reino */}
+            <div className="card">
+              <div className="card-title">Participantes</div>
+              <div className="card-sub">Alunos com acesso à Mesa do Reino</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 10 }}>
+                {alunos.filter(a => a.mentorias?.id === MENTORIA_MESA || a.mentorias?.nome === 'Mesa do Reino').map(a => (
+                  <div key={a.id} className="li">
+                    <div className="li-avatar">{initials(a.usuarios?.nome)}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{a.usuarios?.nome}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>{a.usuarios?.email}</div>
+                    </div>
+                    <span className={a.acesso_ativo ? 'badge badge-green' : 'badge badge-red'}>{a.acesso_ativo ? 'Ativo' : 'Inativo'}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
