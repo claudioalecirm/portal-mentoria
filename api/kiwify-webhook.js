@@ -1,7 +1,7 @@
 // api/kiwify-webhook.js
-const { createClient } = require('@supabase/supabase-js')
-const { Resend } = require('resend')
-const crypto = require('crypto')
+import { createClient } from '@supabase/supabase-js'
+import { Resend } from 'resend'
+import crypto from 'crypto'
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -16,7 +16,9 @@ const PRODUTO_MAP = {
 }
 const MENTORIA_MESA = '10000000-0000-0000-0000-000000000003'
 
-module.exports = async function handler(req, res) {
+export const config = { api: { bodyParser: true } }
+
+export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
   let body = req.body
@@ -24,7 +26,6 @@ module.exports = async function handler(req, res) {
     try { body = JSON.parse(body) } catch { body = {} }
   }
 
-  // Validação do token Kiwify
   const tokenKiwify = process.env.KIWIFY_WEBHOOK_TOKEN
   if (tokenKiwify) {
     const tokenRecebido = req.headers['x-kiwify-token'] || req.query.token
@@ -60,27 +61,26 @@ module.exports = async function handler(req, res) {
   if (!mentoriaId) {
     if (nomeProduto.includes('mesa')) mentoriaId = PRODUTO_MAP['mesa do reino']
     else if (nomeProduto.includes('governo')) mentoriaId = PRODUTO_MAP['mentoria governo pessoal']
-    else if (nomeProduto.includes('homem') || nomeProduto.includes('espiritual')) mentoriaId = PRODUTO_MAP['mentoria homem espiritual']
-    else mentoriaId = PRODUTO_MAP['mentoria homem espiritual'] // fallback
+    else mentoriaId = PRODUTO_MAP['mentoria homem espiritual']
   }
 
-  console.log('[kiwify] email:', email, '| mentoriaId:', mentoriaId)
+  console.log('[kiwify] email:', email, '| mentoria:', mentoriaId)
 
   // Verifica/cria usuário
   const { data: userExiste } = await supabase.from('usuarios').select('id').eq('email', email).single()
   let usuarioId = userExiste?.id
 
   if (!usuarioId) {
-    const { data: novoUser, error: errUser } = await supabase.from('usuarios')
+    const { data: novoUser, error: e } = await supabase.from('usuarios')
       .insert({ nome, email, senha_hash: 'pendente', role: 'aluno', ativo: true })
       .select().single()
-    console.log('[kiwify] novo usuário:', novoUser?.id, 'erro:', errUser?.message)
+    console.log('[kiwify] novo usuário:', novoUser?.id, 'erro:', e?.message)
     usuarioId = novoUser?.id
   }
 
   if (!usuarioId) return res.status(200).json({ ok: true, aviso: 'erro usuario' })
 
-  // Verifica se já tem acesso a esta mentoria
+  // Verifica se já tem acesso
   const { data: alunoExiste } = await supabase.from('alunos')
     .select('id').eq('usuario_id', usuarioId).eq('mentoria_id', mentoriaId).single()
 
@@ -95,7 +95,6 @@ module.exports = async function handler(req, res) {
   const token = crypto.randomBytes(32).toString('hex')
   const isMesa = mentoriaId === MENTORIA_MESA
 
-  // Cria aluno
   const { data: novoAluno, error: errAluno } = await supabase.from('alunos').insert({
     usuario_id: usuarioId,
     mentoria_id: mentoriaId,
@@ -111,7 +110,6 @@ module.exports = async function handler(req, res) {
   if (!novoAluno?.id) return res.status(200).json({ ok: true, aviso: 'erro aluno' })
 
   if (!isMesa) {
-    // Cria processo + encontros + ferramentas
     const { data: proc } = await supabase.from('processos')
       .insert({ aluno_id: novoAluno.id, mentoria_id: mentoriaId, status: 'ativo', progresso: 0 })
       .select().single()
@@ -135,7 +133,7 @@ module.exports = async function handler(req, res) {
       )
     }
 
-    // Bônus: Mesa do Reino
+    // Bônus Mesa do Reino
     const { data: temMesa } = await supabase.from('alunos')
       .select('id').eq('usuario_id', usuarioId).eq('mentoria_id', MENTORIA_MESA).single()
     if (!temMesa) {
@@ -147,20 +145,16 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // Nomes dos produtos
   const mentoriaNome = nomeProduto.includes('governo') ? 'Mentoria Governo Pessoal'
-    : nomeProduto.includes('espiritual') ? 'Mentoria Homem Espiritual'
+    : nomeProduto.includes('espiritual') || nomeProduto.includes('homem') ? 'Mentoria Homem Espiritual'
     : 'Mesa do Reino'
 
-  // Envia email
   if (isMesa) {
     await enviarEmailAcessoMesa(email, nome)
   } else {
-    const linkOnboarding = `${APP_URL}/cadastro?token=${token}`
-    await enviarEmailOnboarding(email, nome, mentoriaNome, linkOnboarding)
+    await enviarEmailOnboarding(email, nome, mentoriaNome, `${APP_URL}/cadastro?token=${token}`)
   }
 
-  // Push mentor
   await fetch(`${APP_URL}/api/push-send`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -171,77 +165,62 @@ module.exports = async function handler(req, res) {
     })
   }).catch(() => {})
 
-  console.log('[kiwify] concluído para:', email)
+  console.log('[kiwify] concluído:', email)
   res.status(200).json({ ok: true, aluno_id: novoAluno.id })
 }
 
 async function enviarEmailOnboarding(email, nome, mentoria, link) {
-  await resend.emails.send({
+  const r = await resend.emails.send({
     from: 'Claudio Alecrim <noreply@claudioalecrim.com.br>',
     to: email,
     subject: `Bem-vindo à ${mentoria} — Complete seu cadastro`,
-    html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:0;background:#f5f5f5">
-        <div style="background:#0a0a0a;padding:32px 40px;border-radius:12px 12px 0 0;text-align:center">
-          <div style="font-family:Georgia,serif;font-size:26px;color:#c8a97a;font-weight:500">Claudio Alecrim</div>
-          <div style="font-size:11px;color:#5a5550;letter-spacing:.2em;text-transform:uppercase;margin-top:4px">Portal de Mentoria</div>
-        </div>
-        <div style="background:#fff;padding:36px 40px">
-          <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
-          <p style="font-size:14px;color:#555;line-height:1.7">
-            Seu pagamento da <strong style="color:#c8a97a">${mentoria}</strong> foi confirmado.<br/>
-            Clique abaixo para preencher o alinhamento de expectativas e criar seu acesso ao portal.
-          </p>
-          <a href="${link}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">
-            Completar meu cadastro →
-          </a>
-          <div style="background:#fafafa;border-radius:8px;padding:14px 18px">
-            <div style="font-size:12px;color:#888;margin-bottom:4px">Após o cadastro, acesse sempre pelo endereço:</div>
-            <a href="${APP_URL}" style="color:#c8a97a;font-size:14px;font-weight:500;text-decoration:none">${APP_URL}</a>
-          </div>
-          <p style="font-size:11px;color:#999;text-align:center;margin-top:16px">Link pessoal · expira em 7 dias</p>
-        </div>
-        <div style="background:#0a0a0a;padding:20px 40px;border-radius:0 0 12px 12px;text-align:center">
-          <p style="font-size:11px;color:#5a5550;margin:0">© Claudio Alecrim · claudioalecrim.com.br</p>
-        </div>
+    html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:0;background:#f5f5f5">
+      <div style="background:#0a0a0a;padding:32px 40px;border-radius:12px 12px 0 0;text-align:center">
+        <div style="font-family:Georgia,serif;font-size:26px;color:#c8a97a;font-weight:500">Claudio Alecrim</div>
+        <div style="font-size:11px;color:#5a5550;letter-spacing:.2em;text-transform:uppercase;margin-top:4px">Portal de Mentoria</div>
       </div>
-    `
-  }).catch(e => console.log('[kiwify] erro email:', e.message))
+      <div style="background:#fff;padding:36px 40px">
+        <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
+        <p style="font-size:14px;color:#555;line-height:1.7">Seu pagamento da <strong style="color:#c8a97a">${mentoria}</strong> foi confirmado.<br/>Clique abaixo para preencher o alinhamento de expectativas e criar seu acesso.</p>
+        <a href="${link}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">Completar meu cadastro →</a>
+        <div style="background:#fafafa;border-radius:8px;padding:14px 18px">
+          <div style="font-size:12px;color:#888;margin-bottom:4px">Após o cadastro, acesse sempre pelo endereço:</div>
+          <a href="${APP_URL}" style="color:#c8a97a;font-size:14px;font-weight:500;text-decoration:none">${APP_URL}</a>
+        </div>
+        <p style="font-size:11px;color:#999;text-align:center;margin-top:16px">Link pessoal · expira em 7 dias</p>
+      </div>
+      <div style="background:#0a0a0a;padding:20px 40px;border-radius:0 0 12px 12px;text-align:center">
+        <p style="font-size:11px;color:#5a5550;margin:0">© Claudio Alecrim · claudioalecrim.com.br</p>
+      </div>
+    </div>`
+  })
+  console.log('[kiwify] email onboarding:', JSON.stringify(r))
 }
 
 async function enviarEmailAcessoMesa(email, nome) {
-  await resend.emails.send({
+  const r = await resend.emails.send({
     from: 'Claudio Alecrim <noreply@claudioalecrim.com.br>',
     to: email,
     subject: 'Bem-vindo à Mesa do Reino — Acesse seu portal',
-    html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:0;background:#f5f5f5">
-        <div style="background:#0a0a0a;padding:32px 40px;border-radius:12px 12px 0 0;text-align:center">
-          <div style="font-family:Georgia,serif;font-size:26px;color:#c8a97a;font-weight:500">Claudio Alecrim</div>
-          <div style="font-size:11px;color:#5a5550;letter-spacing:.2em;text-transform:uppercase;margin-top:4px">Mesa do Reino</div>
-        </div>
-        <div style="background:#fff;padding:36px 40px">
-          <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
-          <p style="font-size:14px;color:#555;line-height:1.7">
-            Seu acesso à <strong style="color:#c8a97a">Mesa do Reino</strong> foi confirmado.<br/>
-            Clique abaixo para acessar o portal e criar sua senha.
-          </p>
-          <a href="${APP_URL}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">
-            Acessar o Portal →
-          </a>
-          <div style="background:#fafafa;border-radius:8px;padding:14px 18px;margin-bottom:16px">
-            <div style="font-size:12px;color:#888;margin-bottom:6px">Suas credenciais:</div>
-            <div style="font-size:13px;color:#333;margin-bottom:4px"><strong>Login:</strong> ${email}</div>
-            <div style="font-size:12px;color:#888">Clique em "Esqueci minha senha" para criar sua senha no primeiro acesso.</div>
-          </div>
-          <p style="font-size:12px;color:#888;line-height:1.6">
-            As cobranças são realizadas todo dia <strong>4 de cada mês</strong> pela Kiwify.
-          </p>
-        </div>
-        <div style="background:#0a0a0a;padding:20px 40px;border-radius:0 0 12px 12px;text-align:center">
-          <p style="font-size:11px;color:#5a5550;margin:0">© Claudio Alecrim · claudioalecrim.com.br</p>
-        </div>
+    html: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:0;background:#f5f5f5">
+      <div style="background:#0a0a0a;padding:32px 40px;border-radius:12px 12px 0 0;text-align:center">
+        <div style="font-family:Georgia,serif;font-size:26px;color:#c8a97a;font-weight:500">Claudio Alecrim</div>
+        <div style="font-size:11px;color:#5a5550;letter-spacing:.2em;text-transform:uppercase;margin-top:4px">Mesa do Reino</div>
       </div>
-    `
-  }).catch(e => console.log('[kiwify] erro email mesa:', e.message))
+      <div style="background:#fff;padding:36px 40px">
+        <p style="font-size:16px;color:#111">Olá, <strong>${nome}</strong>!</p>
+        <p style="font-size:14px;color:#555;line-height:1.7">Seu acesso à <strong style="color:#c8a97a">Mesa do Reino</strong> foi confirmado. Clique abaixo para acessar o portal.</p>
+        <a href="${APP_URL}" style="display:block;background:#c8a97a;color:#0a0a0a;text-decoration:none;padding:16px;border-radius:8px;text-align:center;font-weight:600;font-size:15px;margin:24px 0">Acessar o Portal →</a>
+        <div style="background:#fafafa;border-radius:8px;padding:14px 18px;margin-bottom:16px">
+          <div style="font-size:12px;color:#888;margin-bottom:6px">Login: ${email}</div>
+          <div style="font-size:12px;color:#888">Clique em "Esqueci minha senha" para criar sua senha no primeiro acesso.</div>
+        </div>
+        <p style="font-size:12px;color:#888">Cobranças todo dia <strong>4 de cada mês</strong> pela Kiwify.</p>
+      </div>
+      <div style="background:#0a0a0a;padding:20px 40px;border-radius:0 0 12px 12px;text-align:center">
+        <p style="font-size:11px;color:#5a5550;margin:0">© Claudio Alecrim · claudioalecrim.com.br</p>
+      </div>
+    </div>`
+  })
+  console.log('[kiwify] email mesa:', JSON.stringify(r))
 }
