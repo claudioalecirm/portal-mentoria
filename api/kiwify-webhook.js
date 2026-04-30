@@ -130,8 +130,8 @@ export default async function handler(req, res) {
     }
   }
 
-  const mentoriaNome = nomeProduto.includes('governo') ? 'Mentoria Governo Pessoal'
-    : nomeProduto.includes('espiritual') || nomeProduto.includes('homem') ? 'Mentoria Homem Espiritual'
+  const mentoriaNome = mentoriaId === '10000000-0000-0000-0000-000000000001' ? 'Mentoria Governo Pessoal'
+    : mentoriaId === '10000000-0000-0000-0000-000000000002' ? 'Mentoria Homem Espiritual'
     : 'Mesa do Reino'
 
   // Envia email
